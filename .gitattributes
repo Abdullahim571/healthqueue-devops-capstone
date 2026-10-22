@@ -1,0 +1,2 @@
+# Keep LF line endings everywhere (CI runners and containers are Linux)
+* text=auto eol=lf
