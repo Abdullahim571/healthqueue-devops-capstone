@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+# OpenTofu
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+# Supply-chain outputs generated in CI
+sbom*.json
+cosign.key
