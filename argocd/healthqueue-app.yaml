@@ -1,0 +1,26 @@
+# Argo CD Application: keeps the "healthqueue" namespace in sync with k8s/ on main.
+# Apply after Argo CD is installed and k8s/ is pushed:
+#   kubectl --context kind-healthqueue apply -f argocd/healthqueue-app.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: healthqueue-api
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io # deleting the Application also removes what it deployed
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Abdullahim571/healthqueue-devops-capstone.git
+    targetRevision: main
+    path: k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: healthqueue
+  syncPolicy:
+    automated:
+      prune: true    # remove resources deleted from Git
+      selfHeal: true # revert manual changes made in the cluster
+    retry:
+      limit: 5
+      backoff: {duration: 10s, factor: 2, maxDuration: 3m}

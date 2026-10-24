@@ -47,6 +47,28 @@ docker run -p 8000:8000 healthqueue-api:dev
 | Verify | `cosign verify` / `verify-attestation` | main only |
 | Deliver | Digest bump in `k8s/` → Argo CD sync | main only |
 
+## Kubernetes + Argo CD (local kind cluster)
+
+| Path | Contents |
+|---|---|
+| `cluster/kind-config.yaml` | Single-node kind cluster named `healthqueue` |
+| `argocd/kustomization.yaml` | Argo CD v3.5.6, trimmed (no dex / notifications / ApplicationSet) with memory limits |
+| `argocd/healthqueue-app.yaml` | Argo CD Application syncing `k8s/` from `main` (auto-sync, prune, self-heal) |
+| `k8s/` | Namespace (restricted Pod Security), Deployment, Service; image pinned by digest |
+
+```bash
+kind create cluster --config cluster/kind-config.yaml
+kubectl --context kind-healthqueue apply --server-side --force-conflicts -k argocd/
+kubectl --context kind-healthqueue apply -f argocd/healthqueue-app.yaml
+
+# Argo CD UI: https://localhost:8443  (user: admin)
+kubectl --context kind-healthqueue -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+kubectl --context kind-healthqueue -n argocd port-forward svc/argocd-server 8443:443
+
+# API (port 8000 is taken by the OpenTofu container)
+kubectl --context kind-healthqueue -n healthqueue port-forward svc/healthqueue-api 8080:80
+```
+
 Verify a published image yourself:
 
 ```bash

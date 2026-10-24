@@ -1,0 +1,20 @@
+# Desired state of the HealthQueue API, synced to the cluster by Argo CD.
+# CI (gitops-bump job) updates the image digest below after each signed build on main.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: healthqueue
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: healthqueue
+      app.kubernetes.io/managed-by: argocd
+
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+
+images:
+  - name: healthqueue-api
+    newName: ghcr.io/abdullahim571/healthqueue-devops-capstone
+    digest: sha256:6777b2a1d39429f1a4f117385f2b3a65d522d61f7b20040e614f4bf9b2e22a92

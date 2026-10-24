@@ -1,0 +1,13 @@
+# Local Kubernetes cluster for HealthQueue (kind = Kubernetes in Docker).
+#   kind create cluster --config cluster/kind-config.yaml
+# Kept separate from other kind clusters (e.g. ShipFast): own name, own node container,
+# own kubeconfig context (kind-healthqueue), API server on a random loopback port.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: healthqueue
+nodes:
+  - role: control-plane
+    # Pinned to the kind v0.30.0 default node image (Kubernetes v1.34.0).
+    image: kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a
+networking:
+  apiServerAddress: "127.0.0.1"
