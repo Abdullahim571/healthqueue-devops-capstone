@@ -1,7 +1,55 @@
 # HealthQueue — Appointment Scheduling API (DevOps Capstone)
 
-Patient-facing appointment scheduling API with a production-grade DevOps pipeline.
+Patient-facing appointment scheduling API for HealthQueue, a health-tech startup, with a
+production-grade DevOps pipeline: CI/CD with supply-chain security, OpenTofu infrastructure,
+GitOps delivery to Kubernetes with Argo CD, and an observability plan with SLOs.
 **All patient data is fictional.**
+
+## Capstone requirements → evidence
+
+| # | Requirement | Where | Verified result (2026-10-24) |
+|---|---|---|---|
+| 1 | CI/CD: automated build, test, security scanning, SBOM, signing | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | All 7 jobs green on the last 3 pushes to `main`; 13/13 unit tests pass; image signature, SBOM attestation and SLSA provenance verified independently with cosign |
+| 2 | OpenTofu: ≥ 2 resources with state management | [`infra/`](infra/) | 4 resources (network, volume, image, container); encrypted state; `tofu validate` passes and `tofu plan` reports **No changes** |
+| 3 | Containerized app on Kubernetes via GitOps | [`k8s/`](k8s/), [`argocd/`](argocd/), [`cluster/`](cluster/) | Argo CD **Synced / Healthy**; 2 automated deployments, each **~4–5 min from commit to running pod** |
+| 4 | Observability plan: SLIs, SLOs, error budget | [`docs/monitoring-plan.md`](docs/monitoring-plan.md), [`observability/`](observability/) | 99.5 % availability / 95 % ≤ 300 ms SLOs; 30-day budget **216 min**; 34 alert rules pass `promtool` unit tests |
+| 5 | DORA baseline from 90 days of synthetic data | [`docs/dora-baseline.md`](docs/dora-baseline.md), [`docs/dora/`](docs/dora/) | Reproducible, seeded generator + metrics script; **synthetic** results clearly separated from real measurements |
+| 6 | Supply chain security summary, SLSA alignment | [`docs/supply-chain-security.md`](docs/supply-chain-security.md) | Provenance verified as signed by the SLSA generator; Build L3 alignment (**self-assessed**) with gaps listed |
+
+## Architecture
+
+```mermaid
+flowchart LR
+  DEV["Developer<br/>git push main"] --> GHA
+  subgraph GHA["GitHub Actions (ci.yml)"]
+    T["pytest"] & S["Trivy fs<br/>deps · secrets · IaC"] --> B["Build → Trivy image gate<br/>→ Syft SBOM"]
+    B --> P["Push to GHCR by digest<br/>cosign sign + SBOM attest + verify"]
+    P --> L["SLSA L3 provenance<br/>(isolated generator)"]
+    L --> G["gitops-bump:<br/>commit new digest to k8s/"]
+  end
+  P --> GHCR[("GHCR<br/>image + signature<br/>+ attestations")]
+  G --> REPO[("GitHub repo<br/>k8s/kustomization.yaml")]
+  subgraph KIND["kind cluster: healthqueue"]
+    ARGO["Argo CD<br/>auto-sync · prune · self-heal"] --> POD["healthqueue-api pod<br/>/healthz /readyz /metrics"]
+  end
+  REPO -- "polls main" --> ARGO
+  GHCR -- "pull by digest" --> POD
+  TOFU["OpenTofu (infra/)"] --> DOCKER["Docker: network · volume<br/>image · container :8000"]
+```
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `app/`, `tests/` | FastAPI service (in-memory store, fictional patients) and pytest suite |
+| `Dockerfile` | Multi-stage, non-root (UID 10001), pip removed from the runtime image |
+| `.github/` | CI/CD workflow and Dependabot config |
+| `infra/` | OpenTofu: local Docker deployment with encrypted state ([infra/README.md](infra/README.md)) |
+| `cluster/` | kind cluster definition |
+| `argocd/` | Lean Argo CD install and the `healthqueue-api` Application |
+| `k8s/` | Kubernetes manifests synced by Argo CD (image digest updated by CI) |
+| `observability/` | Prometheus SLO recording/alert rules + unit tests (not deployed) |
+| `docs/` | Monitoring plan, DORA baseline, supply chain security summary |
 
 ## Run locally
 
@@ -29,7 +77,7 @@ docker run -p 8000:8000 healthqueue-api:dev
 | POST | `/appointments` | Book (409 on provider double-booking) |
 | GET | `/appointments/{id}` | Get one |
 | DELETE | `/appointments/{id}` | Cancel |
-| GET | `/healthz`, `/readyz` | Liveness / readiness probes |
+| GET | `/healthz`, `/readyz` | Liveness / readiness probes (`/readyz` reports the deployed Git SHA) |
 | GET | `/metrics` | Prometheus metrics (SLI source) |
 
 ## CI/CD pipeline (`.github/workflows/ci.yml`)
@@ -46,6 +94,22 @@ docker run -p 8000:8000 healthqueue-api:dev
 | Attest | cosign SBOM attestation + SLSA L3 provenance | main only |
 | Verify | `cosign verify` / `verify-attestation` | main only |
 | Deliver | Digest bump in `k8s/` → Argo CD sync | main only |
+
+Pull requests run everything up to the image scan and SBOM, but never publish or sign. Changes
+only under `docs/`, `observability/` or `*.md` don't run the pipeline, so they don't redeploy.
+The gate works: commit `2b0e5de` failed unit tests and was never published.
+
+## Infrastructure as code (OpenTofu)
+
+[`infra/`](infra/) provisions the API on the local Docker Engine: a private bridge network, a named
+volume, an image built from the project Dockerfile, and a hardened container (read-only root
+filesystem, all capabilities dropped, loopback-only port 8000).
+
+- **State management:** `local` backend with OpenTofu **native state and plan encryption** (PBKDF2 + AES-GCM, `enforced = true`). The passphrase comes from `TF_VAR_state_passphrase` and is never committed. State files are gitignored, and the provider lock file is committed.
+- **Drift check:** `tofu plan` reports *No changes* (verified 2026-10-24).
+- **Why local Docker instead of a cloud provider:** it keeps the capstone at **$0** with no cloud account. The workflow (`init → validate → plan → apply`, versioned providers, encrypted state, no-drift check) is identical for a cloud provider. Moving to AWS/Azure/GCP means swapping the provider and resources, and adding a remote backend with locking (e.g. an object-storage bucket).
+
+Usage, variables and outputs: [infra/README.md](infra/README.md).
 
 ## Kubernetes + Argo CD (local kind cluster)
 
@@ -69,6 +133,11 @@ kubectl --context kind-healthqueue -n argocd port-forward svc/argocd-server 8443
 kubectl --context kind-healthqueue -n healthqueue port-forward svc/healthqueue-api 8080:80
 ```
 
+Delivery loop: a push to `main` → CI builds, scans, signs and attests the image → the
+`gitops-bump` job commits the new digest (`deploy: healthqueue-api <sha> [skip ci]`) → Argo CD
+syncs it automatically. To roll back, `git revert` the deploy commit (see the
+[monitoring plan](docs/monitoring-plan.md#63-rollback-through-gitops)).
+
 ## Observability
 
 Full plan: **[docs/monitoring-plan.md](docs/monitoring-plan.md)**. It covers SLIs, SLOs, error budget, metrics, logs, traces, alerts, incident response and runbooks.
@@ -82,10 +151,42 @@ Full plan: **[docs/monitoring-plan.md](docs/monitoring-plan.md)**. It covers SLI
 - Prometheus recording and burn-rate alert rules: [`observability/prometheus/`](observability/prometheus/). They're unit-tested with `promtool test rules` and are **not deployed yet**.
 - Planned stack: Prometheus + Alertmanager, Grafana, Loki (logs), Tempo (traces), OpenTelemetry SDK + Collector.
 
-Verify a published image yourself:
+## DORA metrics baseline
+
+Full analysis: **[docs/dora-baseline.md](docs/dora-baseline.md)**.
+
+**Real (verified):** 2 automated deployments, with lead times of **3 min 55 s** and **5 min 05 s**
+from commit to running pod; 0 failed deployments.
+
+**Baseline from 90 days of SYNTHETIC data** (seeded generator, timings anchored on the real CI and
+Argo CD measurements; these are *example* figures, not real history):
+
+| DORA metric | Synthetic baseline | Band |
+|---|---|---|
+| Deployment frequency | 0.92 deploys/day | High |
+| Lead time for changes | median 2.6 h | Elite |
+| Change failure rate | 6.0 % (5 of 83) | High |
+| Failed deployment recovery time | median 16 min | Elite |
+
+## Supply chain security (SLSA)
+
+Full summary: **[docs/supply-chain-security.md](docs/supply-chain-security.md)**.
+
+- Verified on 2026-10-24 for the deployed image: the cosign **signature** and **SPDX SBOM attestation** (both signed by the `ci.yml` workflow identity), and **SLSA provenance** signed by the isolated `slsa-github-generator`.
+- **Self-assessed** SLSA v1.0 **Build L3** alignment, with one caveat (shared build cache).
+- Known gaps: no branch protection, base image not pinned by digest, no hash-pinned dependencies, no signature enforcement in the cluster. A prioritised roadmap is in the summary.
+
+Verify a published image yourself (Docker only, no install):
 
 ```bash
-cosign verify ghcr.io/<owner>/healthqueue-devops-capstone@sha256:<digest> \
-  --certificate-identity https://github.com/<owner>/healthqueue-devops-capstone/.github/workflows/ci.yml@refs/heads/main \
+docker run --rm ghcr.io/sigstore/cosign/cosign:latest verify \
+  ghcr.io/abdullahim571/healthqueue-devops-capstone@sha256:<digest> \
+  --certificate-identity https://github.com/Abdullahim571/healthqueue-devops-capstone/.github/workflows/ci.yml@refs/heads/main \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
+
+## Known limitations
+
+- **Single replica with an in-memory store:** a pod restart is an outage and loses appointments. Next step: a shared database and ≥ 2 replicas.
+- **Local environment:** kind and Docker Desktop on one machine. The monitoring stack is planned but not installed.
+- **Source protection:** `main` is not branch-protected and commits are unsigned (see the supply chain summary).
