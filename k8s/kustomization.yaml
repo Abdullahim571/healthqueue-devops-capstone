@@ -5,16 +5,16 @@ kind: Kustomization
 namespace: healthqueue
 
 labels:
-  - pairs:
-      app.kubernetes.io/part-of: healthqueue
-      app.kubernetes.io/managed-by: argocd
+- pairs:
+    app.kubernetes.io/managed-by: argocd
+    app.kubernetes.io/part-of: healthqueue
 
 resources:
-  - namespace.yaml
-  - deployment.yaml
-  - service.yaml
+- namespace.yaml
+- deployment.yaml
+- service.yaml
 
 images:
-  - name: healthqueue-api
-    newName: ghcr.io/abdullahim571/healthqueue-devops-capstone
-    digest: sha256:6777b2a1d39429f1a4f117385f2b3a65d522d61f7b20040e614f4bf9b2e22a92
+- digest: sha256:a90c2195d422afde07b01def24acadb659899ca1f6e5ac7ee90a8d8f57505703
+  name: healthqueue-api
+  newName: ghcr.io/abdullahim571/healthqueue-devops-capstone
