@@ -1,0 +1,294 @@
+# HealthQueue SLO recording + alerting rules (Prometheus rule-file format).
+# NOT deployed - see docs/monitoring-plan.md. Validate with:
+#   promtool check rules healthqueue-rules.yaml
+#   promtool test rules healthqueue-rules.test.yaml
+# For kube-prometheus-stack, paste the "groups:" list under a PrometheusRule's spec.
+#
+# SLI scope: business routes only. Kubelet probes (/healthz, /readyz) and unknown
+# paths ("unmatched") are excluded; /metrics is never counted by the app.
+# Generated from a single selector: job="healthqueue-api",route!~"/healthz|/readyz|unmatched"
+groups:
+  - name: healthqueue-sli
+    interval: 30s
+    rules:
+      - record: healthqueue:error_ratio:rate5m
+        expr: |
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",status=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[5m]))
+      - record: healthqueue:error_ratio:rate30m
+        expr: |
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",status=~"5.."}[30m]))
+          /
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[30m]))
+      - record: healthqueue:error_ratio:rate1h
+        expr: |
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",status=~"5.."}[1h]))
+          /
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[1h]))
+      - record: healthqueue:error_ratio:rate2h
+        expr: |
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",status=~"5.."}[2h]))
+          /
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[2h]))
+      - record: healthqueue:error_ratio:rate6h
+        expr: |
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",status=~"5.."}[6h]))
+          /
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[6h]))
+      - record: healthqueue:error_ratio:rate1d
+        expr: |
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",status=~"5.."}[1d]))
+          /
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[1d]))
+      - record: healthqueue:error_ratio:rate3d
+        expr: |
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",status=~"5.."}[3d]))
+          /
+          sum(rate(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[3d]))
+      - record: healthqueue:slow_ratio:rate5m
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",le="0.3"}[5m]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[5m]))
+          )
+      - record: healthqueue:slow_ratio:rate30m
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",le="0.3"}[30m]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[30m]))
+          )
+      - record: healthqueue:slow_ratio:rate1h
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",le="0.3"}[1h]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[1h]))
+          )
+      - record: healthqueue:slow_ratio:rate2h
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",le="0.3"}[2h]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[2h]))
+          )
+      - record: healthqueue:slow_ratio:rate6h
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",le="0.3"}[6h]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[6h]))
+          )
+      - record: healthqueue:slow_ratio:rate1d
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",le="0.3"}[1d]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[1d]))
+          )
+      - record: healthqueue:slow_ratio:rate3d
+        expr: |
+          1 - (
+            sum(rate(http_request_duration_seconds_bucket{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",le="0.3"}[3d]))
+            /
+            sum(rate(http_request_duration_seconds_count{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[3d]))
+          )
+      - record: healthqueue:latency_p99:rate5m
+        expr: histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[5m])))
+
+  - name: healthqueue-slo-30d
+    interval: 5m # 30-day windows are expensive; 5m resolution is plenty for reporting
+    rules:
+      - record: healthqueue:availability:ratio30d
+        expr: |
+          1 - (
+            sum(increase(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",status=~"5.."}[30d]))
+            /
+            sum(increase(http_requests_total{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[30d]))
+          )
+      - record: healthqueue:latency_fast:ratio30d
+        expr: |
+          sum(increase(http_request_duration_seconds_bucket{job="healthqueue-api",route!~"/healthz|/readyz|unmatched",le="0.3"}[30d]))
+          /
+          sum(increase(http_request_duration_seconds_count{job="healthqueue-api",route!~"/healthz|/readyz|unmatched"}[30d]))
+      # 1 = whole budget left, 0 = exhausted, negative = SLO breached.
+      - record: healthqueue:availability:error_budget_remaining
+        expr: 1 - (1 - healthqueue:availability:ratio30d) / (1 - 0.995)
+      - record: healthqueue:latency:error_budget_remaining
+        expr: 1 - (1 - healthqueue:latency_fast:ratio30d) / (1 - 0.95)
+
+
+  - name: healthqueue-alerts
+    rules:
+      - alert: HealthQueueAvailabilityBurnFast
+        expr: |
+          healthqueue:error_ratio:rate1h > 0.072
+          and
+          healthqueue:error_ratio:rate5m > 0.072
+        for: 2m
+        labels:
+          severity: page
+          slo: availability
+        annotations:
+          summary: "HealthQueue availability error budget burning 14.4x too fast"
+          description: "availability SLI over 1h and 5m exceeds 0.072 (14.4x burn rate); at this rate 2% of the 30-day budget is spent in 1h."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-availability"
+      - alert: HealthQueueAvailabilityBurnMedium
+        expr: |
+          healthqueue:error_ratio:rate6h > 0.03
+          and
+          healthqueue:error_ratio:rate30m > 0.03
+        for: 15m
+        labels:
+          severity: page
+          slo: availability
+        annotations:
+          summary: "HealthQueue availability error budget burning 6x too fast"
+          description: "availability SLI over 6h and 30m exceeds 0.03 (6x burn rate); at this rate 5% of the 30-day budget is spent in 6h."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-availability"
+      - alert: HealthQueueAvailabilityBurnSlow
+        expr: |
+          healthqueue:error_ratio:rate1d > 0.015
+          and
+          healthqueue:error_ratio:rate2h > 0.015
+        for: 1h
+        labels:
+          severity: ticket
+          slo: availability
+        annotations:
+          summary: "HealthQueue availability error budget burning 3x too fast"
+          description: "availability SLI over 1d and 2h exceeds 0.015 (3x burn rate); at this rate 10% of the 30-day budget is spent in 1d."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-availability"
+      - alert: HealthQueueAvailabilityBurnChronic
+        expr: |
+          healthqueue:error_ratio:rate3d > 0.005
+          and
+          healthqueue:error_ratio:rate6h > 0.005
+        for: 3h
+        labels:
+          severity: ticket
+          slo: availability
+        annotations:
+          summary: "HealthQueue availability error budget burning 1x too fast"
+          description: "availability SLI over 3d and 6h exceeds 0.005 (1x burn rate); at this rate 10% of the 30-day budget is spent in 3d."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-availability"
+      - alert: HealthQueueLatencyBurnFast
+        expr: |
+          healthqueue:slow_ratio:rate1h > 0.72
+          and
+          healthqueue:slow_ratio:rate5m > 0.72
+        for: 2m
+        labels:
+          severity: page
+          slo: latency
+        annotations:
+          summary: "HealthQueue latency error budget burning 14.4x too fast"
+          description: "latency SLI over 1h and 5m exceeds 0.72 (14.4x burn rate); at this rate 2% of the 30-day budget is spent in 1h."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-latency"
+      - alert: HealthQueueLatencyBurnMedium
+        expr: |
+          healthqueue:slow_ratio:rate6h > 0.3
+          and
+          healthqueue:slow_ratio:rate30m > 0.3
+        for: 15m
+        labels:
+          severity: page
+          slo: latency
+        annotations:
+          summary: "HealthQueue latency error budget burning 6x too fast"
+          description: "latency SLI over 6h and 30m exceeds 0.3 (6x burn rate); at this rate 5% of the 30-day budget is spent in 6h."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-latency"
+      - alert: HealthQueueLatencyBurnSlow
+        expr: |
+          healthqueue:slow_ratio:rate1d > 0.15
+          and
+          healthqueue:slow_ratio:rate2h > 0.15
+        for: 1h
+        labels:
+          severity: ticket
+          slo: latency
+        annotations:
+          summary: "HealthQueue latency error budget burning 3x too fast"
+          description: "latency SLI over 1d and 2h exceeds 0.15 (3x burn rate); at this rate 10% of the 30-day budget is spent in 1d."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-latency"
+      - alert: HealthQueueLatencyBurnChronic
+        expr: |
+          healthqueue:slow_ratio:rate3d > 0.05
+          and
+          healthqueue:slow_ratio:rate6h > 0.05
+        for: 3h
+        labels:
+          severity: ticket
+          slo: latency
+        annotations:
+          summary: "HealthQueue latency error budget burning 1x too fast"
+          description: "latency SLI over 3d and 6h exceeds 0.05 (1x burn rate); at this rate 10% of the 30-day budget is spent in 3d."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-latency"
+      - alert: HealthQueueLatencyP99High
+        expr: healthqueue:latency_p99:rate5m > 1
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "HealthQueue p99 latency above 1s"
+          description: "99th percentile latency of business routes has been above 1 second for 10 minutes."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-latency"
+      - alert: HealthQueueTargetDown
+        expr: up{job="healthqueue-api"} == 0 or absent(up{job="healthqueue-api"})
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Prometheus cannot scrape the HealthQueue API"
+          description: "The /metrics endpoint has been unreachable for 2 minutes (pod down, crash-looping, or network policy)."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-down"
+      - alert: HealthQueueProbeFailing
+        expr: probe_success{job="blackbox-healthqueue"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Synthetic /healthz probe failing"
+          description: "The blackbox exporter has not received a 2xx from /healthz through the Service for 2 minutes."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-down"
+      - alert: HealthQueuePodRestarting
+        expr: increase(kube_pod_container_status_restarts_total{namespace="healthqueue",container="api"}[30m]) > 2
+        labels:
+          severity: ticket
+        annotations:
+          summary: "HealthQueue API container restarting"
+          description: "The api container restarted more than twice in 30 minutes (OOMKilled or failing liveness probe). In-memory appointments are lost on each restart."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-restarts"
+      - alert: HealthQueueMemoryNearLimit
+        expr: |
+          max(container_memory_working_set_bytes{namespace="healthqueue",container="api"})
+          /
+          max(kube_pod_container_resource_limits{namespace="healthqueue",container="api",resource="memory"})
+          > 0.9
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "HealthQueue API memory above 90% of its limit"
+          description: "Working-set memory has exceeded 90% of the 192Mi limit for 10 minutes; an OOMKill is likely."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-restarts"
+      - alert: HealthQueueArgoCDDegraded
+        expr: argocd_app_info{name="healthqueue-api",health_status!~"Healthy|Progressing"} == 1
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "Argo CD reports healthqueue-api as not healthy"
+          description: "The Argo CD Application has been Degraded/Missing for 10 minutes - usually a bad rollout."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-deploy"
+      - alert: HealthQueueArgoCDOutOfSync
+        expr: argocd_app_info{name="healthqueue-api",sync_status!="Synced"} == 1
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "healthqueue-api has been OutOfSync for 15 minutes"
+          description: "The cluster no longer matches k8s/ on main and auto-sync has not fixed it (sync error or failed hook)."
+          runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-deploy"

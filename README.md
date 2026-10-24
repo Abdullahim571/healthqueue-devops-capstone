@@ -69,6 +69,19 @@ kubectl --context kind-healthqueue -n argocd port-forward svc/argocd-server 8443
 kubectl --context kind-healthqueue -n healthqueue port-forward svc/healthqueue-api 8080:80
 ```
 
+## Observability
+
+Full plan: **[docs/monitoring-plan.md](docs/monitoring-plan.md)**. It covers SLIs, SLOs, error budget, metrics, logs, traces, alerts, incident response and runbooks.
+
+| SLO (rolling 30 days) | Target | Error budget |
+|---|---|---|
+| Availability: business requests without a 5xx | 99.5 % | 216 min of downtime (0.5 % of requests) |
+| Latency: business requests served in ≤ 300 ms | 95 % | 5 % of requests |
+
+- SLIs come from the existing `/metrics` endpoint (`http_requests_total`, `http_request_duration_seconds`). Probe routes are excluded.
+- Prometheus recording and burn-rate alert rules: [`observability/prometheus/`](observability/prometheus/). They're unit-tested with `promtool test rules` and are **not deployed yet**.
+- Planned stack: Prometheus + Alertmanager, Grafana, Loki (logs), Tempo (traces), OpenTelemetry SDK + Collector.
+
 Verify a published image yourself:
 
 ```bash

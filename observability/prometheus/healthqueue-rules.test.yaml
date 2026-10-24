@@ -1,0 +1,71 @@
+# Unit tests for the SLO alerts:  promtool test rules healthqueue-rules.test.yaml
+rule_files:
+  - healthqueue-rules.yaml
+evaluation_interval: 30s
+
+tests:
+  # 10% of business requests fail -> above the 14.4x threshold (7.2%) -> fast burn pages.
+  - interval: 30s
+    input_series:
+      - series: 'http_requests_total{job="healthqueue-api",method="GET",route="/patients",status="200"}'
+        values: '0+90x240'
+      - series: 'http_requests_total{job="healthqueue-api",method="GET",route="/patients",status="500"}'
+        values: '0+10x240'
+      - series: 'up{job="healthqueue-api"}'
+        values: '1x240'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: HealthQueueAvailabilityBurnFast
+        exp_alerts:
+          - exp_labels: {severity: page, slo: availability}
+            exp_annotations:
+              summary: "HealthQueue availability error budget burning 14.4x too fast"
+              description: "availability SLI over 1h and 5m exceeds 0.072 (14.4x burn rate); at this rate 2% of the 30-day budget is spent in 1h."
+              runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-availability"
+      - eval_time: 65m
+        alertname: HealthQueueTargetDown
+        exp_alerts: []
+
+  # 0.1% errors on business routes (within the 0.5% budget) and 100% failing probes
+  # on /healthz: probe traffic must be excluded, so nothing pages.
+  - interval: 30s
+    input_series:
+      - series: 'http_requests_total{job="healthqueue-api",method="GET",route="/patients",status="200"}'
+        values: '0+999x240'
+      - series: 'http_requests_total{job="healthqueue-api",method="GET",route="/patients",status="500"}'
+        values: '0+1x240'
+      - series: 'http_requests_total{job="healthqueue-api",method="GET",route="/healthz",status="500"}'
+        values: '0+500x240'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: HealthQueueAvailabilityBurnFast
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: HealthQueueAvailabilityBurnMedium
+        exp_alerts: []
+
+  # 50% of requests slower than 300ms: above the 6x threshold (30%) but below 14.4x (72%).
+  - interval: 30s
+    input_series:
+      - series: 'http_request_duration_seconds_bucket{job="healthqueue-api",method="GET",route="/patients",le="0.3"}'
+        values: '0+50x240'
+      - series: 'http_request_duration_seconds_count{job="healthqueue-api",method="GET",route="/patients"}'
+        values: '0+100x240'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: HealthQueueLatencyBurnFast
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: HealthQueueLatencyBurnMedium
+        exp_alerts:
+          - exp_labels: {severity: page, slo: latency}
+            exp_annotations:
+              summary: "HealthQueue latency error budget burning 6x too fast"
+              description: "latency SLI over 6h and 30m exceeds 0.3 (6x burn rate); at this rate 5% of the 30-day budget is spent in 6h."
+              runbook_url: "https://github.com/Abdullahim571/healthqueue-devops-capstone/blob/main/docs/monitoring-plan.md#rb-latency"
+    promql_expr_test:
+      - expr: healthqueue:slow_ratio:rate30m
+        eval_time: 65m
+        exp_samples:
+          - labels: "healthqueue:slow_ratio:rate30m"
+            value: 0.5
