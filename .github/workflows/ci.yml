@@ -15,7 +15,8 @@ name: ci
 on:
   push:
     branches: [main]
-    paths-ignore: ["docs/**", "**/*.md"]
+    # Docs and not-yet-deployed monitoring rules don't change the image, so they shouldn't redeploy it.
+    paths-ignore: ["docs/**", "**/*.md", "observability/**"]
   pull_request:
   workflow_dispatch:
 
