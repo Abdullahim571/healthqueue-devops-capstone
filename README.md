@@ -235,7 +235,7 @@ polish last) in six groups, one commit each, and every group was validated befor
 | 3 | Least privilege in the cluster | Dedicated Argo CD **AppProject**; default-deny **NetworkPolicy** (no egress) | `a74bf7a` |
 | 4 | Artifact integrity | Image **built once**; the registry digest is checked against the scanned image before signing and deploying | `c237650` |
 | 5 | Pinning and cleanup | Argo CD install and base image pinned; OpenTofu CPU/memory limits; unused config removed; privacy fix in the 409 error; docs corrected | `4a745ba` |
-| 6 | Professional polish | ruff lint/format and coverage in CI; pre-commit; LICENSE, SECURITY.md, CODEOWNERS, PR template; badges; edge-case tests | *(final Week 8 commit)* |
+| 6 | Professional polish | ruff lint/format and coverage in CI; pre-commit; LICENSE, SECURITY.md, CODEOWNERS, PR template; badges; edge-case tests | `7b66539` |
 
 **Before → after at a glance**
 
@@ -248,10 +248,10 @@ polish last) in six groups, one commit each, and every group was validated befor
 | Cluster blast radius | `default` AppProject, open pod networking | Scoped AppProject, default-deny NetworkPolicy |
 | Repo hygiene | No license, security policy, code owners or PR template | All four, plus pre-commit hooks |
 
-**Reviewing and rolling out.** All six commits are local; nothing has been pushed or deployed.
-After pushing, check that both workflows go green. The first real runs of the new promtool,
-kubeconform and single-build push steps happen there. Then apply the AppProject (Group 3, rollout
-order below) and run `tofu apply` to pick up the container limits (Group 5).
+**Rolling out.** Pushing these commits runs both workflows. That's the first real run of the new
+promtool, kubeconform and single-build push steps, which were validated locally with the real
+scripts against stubs. Then apply the AppProject (Group 3, rollout order below) and run
+`tofu apply` to pick up the container limits (Group 5).
 
 ### Group 1: CI/CD release reliability
 
