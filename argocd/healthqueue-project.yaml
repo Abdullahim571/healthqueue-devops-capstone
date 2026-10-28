@@ -1,0 +1,47 @@
+# Argo CD AppProject: the least-privilege boundary for the healthqueue-api Application.
+# The built-in "default" project allows any repo, any destination namespace and any resource
+# kind (including ClusterRoles and CRDs). This one allows only what k8s/ actually contains, so a
+# bad or malicious commit to k8s/ cannot deploy outside the healthqueue namespace or grant itself
+# cluster-wide permissions: Argo CD refuses to sync it.
+#
+# Apply it BEFORE the Application that references it:
+#   kubectl --context kind-healthqueue apply -f argocd/healthqueue-project.yaml -f argocd/healthqueue-app.yaml
+#
+# Adding a new kind of resource to k8s/ (e.g. a ConfigMap or Ingress) means adding it to the
+# whitelist below; the validate workflow fails until you do.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: healthqueue
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io # can't delete the project while an Application uses it
+spec:
+  description: HealthQueue appointment scheduling API (fictional patient data only)
+
+  # Only this repository can be a source.
+  sourceRepos:
+    - https://github.com/Abdullahim571/healthqueue-devops-capstone.git
+
+  # Only the healthqueue namespace on the local cluster can be a destination.
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: healthqueue
+
+  # Cluster-scoped: only the Namespace itself (k8s/namespace.yaml). No RBAC, CRDs or webhooks.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+  # Namespaced: exactly the kinds in k8s/. Notably excludes Role/RoleBinding and Secret.
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+
+  # Flag (but don't delete) anything in the namespace that isn't in Git, e.g. a hand-made hotfix.
+  orphanedResources:
+    warn: true

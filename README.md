@@ -127,13 +127,14 @@ Usage, variables and outputs: [infra/README.md](infra/README.md).
 |---|---|
 | `cluster/kind-config.yaml` | Single-node kind cluster named `healthqueue` |
 | `argocd/kustomization.yaml` | Argo CD v3.5.6, trimmed (no dex / notifications / ApplicationSet) with memory limits |
+| `argocd/healthqueue-project.yaml` | Least-privilege AppProject: only this repo, only the `healthqueue` namespace, only the resource kinds in `k8s/` |
 | `argocd/healthqueue-app.yaml` | Argo CD Application syncing `k8s/` from `main` (auto-sync, prune, self-heal) |
-| `k8s/` | Namespace (restricted Pod Security), Deployment, Service; image pinned by digest |
+| `k8s/` | Namespace (restricted Pod Security), Deployment, Service, NetworkPolicies (default deny + HTTP only); image pinned by digest |
 
 ```bash
 kind create cluster --config cluster/kind-config.yaml
 kubectl --context kind-healthqueue apply --server-side --force-conflicts -k argocd/
-kubectl --context kind-healthqueue apply -f argocd/healthqueue-app.yaml
+kubectl --context kind-healthqueue apply -f argocd/healthqueue-project.yaml -f argocd/healthqueue-app.yaml
 
 # Argo CD UI: https://localhost:8443  (user: admin)
 kubectl --context kind-healthqueue -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
@@ -223,6 +224,24 @@ Validation runs in its own workflow so rule and doc changes are checked without 
 redeploying the image. Once branch protection is enabled (roadmap item 1 in the
 [supply chain summary](docs/supply-chain-security.md#6-roadmap-not-implemented)), its three jobs
 should be required status checks.
+
+### Group 3: Least privilege in the cluster
+
+| Problem found | Why it mattered | Fix | How it was validated |
+|---|---|---|---|
+| The Application used Argo CD's built-in `default` project | `default` allows any repo, any namespace and any resource kind, so one bad commit to `k8s/` could deploy a ClusterRoleBinding or write into another namespace, and Argo CD would sync it | New [`argocd/healthqueue-project.yaml`](argocd/healthqueue-project.yaml): source = this repo only; destination = `healthqueue` namespace only; cluster-scoped kinds = `Namespace` only; namespaced kinds = `Deployment`, `Service`, `NetworkPolicy` only (no RBAC, no Secrets); orphaned resources flagged | Cross-checked against the rendered `k8s/` output: every kind is whitelisted, the repo and destination match the Application, and every resource lands in the destination namespace |
+| A new kind added to `k8s/` would pass CI but fail at sync time | The whitelist and the manifests can drift apart | New `validate.yml` step compares the `group/kind` pairs in `k8s/` with the AppProject whitelist; AppProject also schema-checked with kubeconform | Same logic run locally: passes today, and correctly reports `/ConfigMap` when a ConfigMap is added |
+| No NetworkPolicy: every pod could talk to anything | A compromised API pod could reach the Kubernetes API, other namespaces or the internet. kind (≥ v0.24) **enforces** NetworkPolicy, so this is a real control here | New [`k8s/networkpolicy.yaml`](k8s/networkpolicy.yaml): namespace-wide **default deny** for ingress and egress, plus one rule allowing TCP to the API's `http` port (8000). The API makes no outbound calls, so it gets no egress | Checked locally: the policy selector matches the Deployment's pod labels; port `http` is the container port, the Service `targetPort` and both probe ports |
+
+**Compatibility decisions.** The allow rule doesn't restrict *who* can connect to port 8000. Kubelet
+probes come from the node's IP, and with a single replica a blocked readiness probe would take the
+API out of the Service. Port-forwarding still works. Prometheus (planned) can scrape `/metrics`
+without another policy. A future database needs its own egress policy (plus DNS on port 53).
+
+**Rollout order** (manual, not yet applied): push, and Argo CD syncs the NetworkPolicies under the
+current project. Then run `kubectl apply -f argocd/healthqueue-project.yaml -f argocd/healthqueue-app.yaml`
+(project first) to move the Application into the new project. To verify afterwards: Application is
+`Synced/Healthy`, the pod is `Ready`, and `curl` through `kubectl port-forward` returns `/healthz`.
 
 ## Known limitations
 

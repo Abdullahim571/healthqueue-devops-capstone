@@ -99,11 +99,27 @@ jobs:
         run: |
           kustomize build k8s \
             | kubeconform -strict -summary -kubernetes-version "$KUBERNETES_VERSION"
-      - name: argocd/healthqueue-app.yaml (Argo CD Application)
+      - name: argocd/healthqueue-{project,app}.yaml (Argo CD AppProject + Application)
         run: |
           kubeconform -strict -summary -kubernetes-version "$KUBERNETES_VERSION" \
             -schema-location default -schema-location "$CRD_SCHEMAS" \
-            argocd/healthqueue-app.yaml
+            argocd/healthqueue-project.yaml argocd/healthqueue-app.yaml
+      # Argo CD refuses to sync a kind the AppProject doesn't whitelist. Catch that here, at PR
+      # time, instead of as a failed sync after merge. Compares "group/kind" pairs (yq is
+      # preinstalled on GitHub's Ubuntu runners).
+      - name: AppProject whitelist covers every resource in k8s/
+        run: |
+          kustomize build k8s \
+            | yq -N '(.apiVersion | sub("/?v[0-9][a-z0-9]*$"; "")) + "/" + .kind' | sort -u > rendered.txt
+          yq -N '(.spec.clusterResourceWhitelist[], .spec.namespaceResourceWhitelist[]) | .group + "/" + .kind' \
+            argocd/healthqueue-project.yaml | sort -u > allowed.txt
+          echo "Rendered kinds:"; sed 's/^/  /' rendered.txt
+          missing=$(comm -23 rendered.txt allowed.txt)
+          if [ -n "$missing" ]; then
+            echo "::error file=argocd/healthqueue-project.yaml::Not whitelisted in the AppProject: $missing"
+            exit 1
+          fi
+          echo "All rendered kinds are allowed by the AppProject."
       # The upstream Argo CD install plus our patches. Not -strict, so upstream quirks don't fail
       # the job; resources whose CRDs have no published schema are skipped rather than failed.
       - name: argocd/ (Argo CD install + resource patches)

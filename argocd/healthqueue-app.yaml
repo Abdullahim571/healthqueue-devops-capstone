@@ -1,6 +1,6 @@
 # Argo CD Application: keeps the "healthqueue" namespace in sync with k8s/ on main.
-# Apply after Argo CD is installed and k8s/ is pushed:
-#   kubectl --context kind-healthqueue apply -f argocd/healthqueue-app.yaml
+# Apply after Argo CD is installed and k8s/ is pushed, together with its AppProject (project first):
+#   kubectl --context kind-healthqueue apply -f argocd/healthqueue-project.yaml -f argocd/healthqueue-app.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -9,7 +9,7 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io # deleting the Application also removes what it deployed
 spec:
-  project: default
+  project: healthqueue # least-privilege project (healthqueue-project.yaml), not the permissive "default"
   source:
     repoURL: https://github.com/Abdullahim571/healthqueue-devops-capstone.git
     targetRevision: main

@@ -1,0 +1,35 @@
+# Zero-trust networking for the healthqueue namespace. kind enforces NetworkPolicy out of the box
+# (kindnet + kube-network-policies, kind >= v0.24), so these rules are live, not decorative.
+#
+# 1) Default deny: no pod in the namespace may receive or send any traffic unless allowed below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+spec:
+  podSelector: {} # every pod in the namespace
+  policyTypes: [Ingress, Egress]
+  # No ingress or egress rules = deny all. The API makes no outbound calls (in-memory store,
+  # no DNS lookups), so it needs no egress at all. This blocks a compromised pod from reaching
+  # the Kubernetes API, other namespaces or the internet. When a database is added, allow egress
+  # to it (and to kube-dns on 53/UDP+TCP) in a separate policy.
+---
+# 2) Allow traffic to the API's HTTP port only.
+#    There is deliberately no "from" selector: kubelet probes (/healthz, /readyz) arrive from the
+#    node's IP, and Prometheus will scrape /metrics from another namespace. Restricting sources
+#    would risk failing the readiness probe and taking the only replica out of the Service.
+#    Every other port on the pod stays closed. kubectl port-forward is unaffected (it enters the
+#    pod's network namespace directly).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: healthqueue-api-allow-http
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: healthqueue-api # same label the Deployment's pods and Service use
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: http # named containerPort 8000 in deployment.yaml

@@ -13,6 +13,7 @@ resources:
 - namespace.yaml
 - deployment.yaml
 - service.yaml
+- networkpolicy.yaml
 
 images:
 - digest: sha256:e86c8d49fa81008619797ba4e91c38a20a0d3911e39f8b8ebdb8c0e0903d236b
