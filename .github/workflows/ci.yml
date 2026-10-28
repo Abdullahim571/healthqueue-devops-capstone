@@ -23,9 +23,12 @@ on:
 permissions:
   contents: read # least privilege by default; jobs elevate only what they need
 
+# Superseded PR runs are cancelled to save minutes. Runs on main are never cancelled: a cancel
+# between "push" and "sign" would leave an unsigned image in GHCR, and a cancel during gitops-bump
+# would skip a deploy. Main runs queue instead, so deploy commits land in order.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
@@ -36,6 +39,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # don't leave the token in .git/config for later steps
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
@@ -54,6 +59,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # Scans requirements files for vulnerable deps, the repo for committed secrets,
       # and Dockerfile / Kubernetes / OpenTofu files for misconfigurations.
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -79,6 +86,8 @@ jobs:
       digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # registry login uses its own token; Git push is not needed here
 
       - name: Compute image name (GHCR requires lowercase)
         id: vars
@@ -236,7 +245,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Check out the tip of main, not the commit that triggered this run: commits that skip CI
+      # (docs/**, *.md, observability/**) may have landed while the pipeline was running, and
+      # pushing on top of a stale checkout would be rejected as non-fast-forward.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0 # full history so the rebase below always finds a merge base
       - name: Set image digest in kustomization
         env:
           NEW_IMAGE: ${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}
@@ -245,9 +260,26 @@ jobs:
             echo "k8s/kustomization.yaml not present yet - skipping GitOps bump" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          cd k8s && kustomize edit set image "healthqueue-api=$NEW_IMAGE" && cd ..
+          # Separate commands, not "cd k8s && kustomize ... && cd ..": bash -e ignores failures
+          # inside && chains, so a kustomize error would silently report "No change".
+          pushd k8s > /dev/null
+          kustomize edit set image "healthqueue-api=$NEW_IMAGE"
+          popd > /dev/null
           if git diff --quiet; then echo "No change"; exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "deploy: healthqueue-api ${GITHUB_SHA::7} [skip ci]"
-          git push
+          # main can still move between checkout and push (e.g. a docs commit). Rebase the
+          # one-line deploy commit onto the new tip and retry. Main runs are serialised by the
+          # concurrency group, so two deploy commits never race each other.
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              echo "Deployed digest ${NEW_IMAGE##*@} (push attempt $attempt)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Push rejected (main moved); rebasing and retrying"
+            git fetch origin main
+            git rebase origin/main
+          done
+          echo "::error::Could not push the deploy commit after 3 attempts"
+          exit 1

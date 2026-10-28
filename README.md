@@ -185,6 +185,21 @@ docker run --rm ghcr.io/sigstore/cosign/cosign:latest verify \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
+## Week 8 refinements (Option A: refine existing work)
+
+The Week 7 capstone was reviewed end to end (CI/CD, Dockerfile, OpenTofu, Kubernetes, Argo CD,
+docs). The fixes below were applied in priority order, one commit per group, and each was
+validated before committing.
+
+### Group 1: CI/CD release reliability
+
+| Problem found | Why it mattered | Fix | How it was validated |
+|---|---|---|---|
+| `cancel-in-progress: true` applied to `main` | Two quick pushes could cancel a release after the image was pushed but before it was signed, leaving an unsigned image in GHCR, or cancel a deploy mid-`gitops-bump` | Cancel only superseded **PR** runs; runs on `main` queue and finish in order | Workflow YAML parsed and the resolved `concurrency` block inspected |
+| `gitops-bump` pushed from the triggering commit with a plain `git push` | Docs-only commits skip CI, so they can land on `main` during a run; the deploy push was then rejected as non-fast-forward and the release never reached the cluster | Check out the tip of `main`; on rejection, fetch, rebase the one-line deploy commit and retry (up to 3 times) | The real `run:` script, extracted from `ci.yml`, run against local throwaway Git repos: a commit landing mid-run is rebased over and the push succeeds on attempt 2 |
+| `cd k8s && kustomize edit ... && cd ..` | `bash -e` ignores failures inside `&&` chains, so a kustomize error printed "No change" and the job went **green without deploying** (found by the test above) | Run the commands separately so any failure fails the job | Same harness with a failing `kustomize` stub: the job now exits 1 and nothing is pushed |
+| `actions/checkout` left the job token in `.git/config` | Any later step (including third-party actions) could read and reuse it | `persist-credentials: false` on every checkout except `gitops-bump`, which needs it to push | Resolved `with:` inputs of every checkout step inspected |
+
 ## Known limitations
 
 - **Single replica with an in-memory store:** a pod restart is an outage and loses appointments. Next step: a shared database and ≥ 2 replicas.
