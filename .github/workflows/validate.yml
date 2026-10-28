@@ -1,0 +1,113 @@
+# HealthQueue configuration validation
+#
+#   prometheus-rules   promtool check + unit tests for the SLO recording/alert rules
+#   opentofu           tofu fmt -check, init (lock file read-only), validate
+#   kubernetes         kustomize build + kubeconform schema checks (Kubernetes 1.34, matching kind)
+#
+# Separate from ci.yml on purpose: ci.yml skips docs/** and observability/** so those changes don't
+# rebuild and redeploy the image, but rule changes still need checking. This workflow runs on every
+# push and PR, builds nothing, publishes nothing and needs no secrets.
+#
+# CLI tools are pinned by version AND sha256 (taken from each project's published checksum file),
+# so a replaced release asset fails the job instead of running. Dependabot updates the pinned
+# actions; the tool versions below are bumped by hand.
+
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PROMETHEUS_VERSION: 3.15.1
+  PROMETHEUS_SHA256: 6a726885328ad9efebbf36e876ce2fb6225468a71fd1e7ce3ba666d5f4d97a84 # prometheus-3.15.1.linux-amd64.tar.gz
+  KUBECONFORM_VERSION: 0.8.0
+  KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883 # kubeconform-linux-amd64.tar.gz
+  KUBERNETES_VERSION: 1.34.0 # cluster/kind-config.yaml node image
+  # Schemas for CRDs (Argo CD Application) that kubeconform does not ship with.
+  CRD_SCHEMAS: https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json
+
+jobs:
+  prometheus-rules:
+    name: Prometheus rules (promtool)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install promtool (checksum-verified)
+        run: |
+          f="prometheus-${PROMETHEUS_VERSION}.linux-amd64"
+          curl -sSfLo "$RUNNER_TEMP/$f.tar.gz" \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/$f.tar.gz"
+          echo "${PROMETHEUS_SHA256}  $RUNNER_TEMP/$f.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$f.tar.gz" -C "$RUNNER_TEMP" "$f/promtool"
+          sudo install "$RUNNER_TEMP/$f/promtool" /usr/local/bin/promtool
+          promtool --version
+      - name: Check syntax and run rule unit tests
+        working-directory: observability/prometheus
+        run: |
+          promtool check rules healthqueue-rules.yaml
+          promtool test rules healthqueue-rules.test.yaml
+
+  opentofu:
+    name: OpenTofu (fmt, validate)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.12.6 # same version used locally
+          tofu_wrapper: false
+      - run: tofu fmt -check -recursive -diff
+      # -backend=false: no state is read or written, so the encryption passphrase isn't needed.
+      # -lockfile=readonly: fail if .terraform.lock.hcl doesn't match the providers in versions.tf.
+      - run: tofu init -backend=false -input=false -lockfile=readonly
+      - run: tofu validate
+
+  kubernetes:
+    name: Kubernetes manifests (kustomize + kubeconform)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install kubeconform (checksum-verified)
+        run: |
+          curl -sSfLo "$RUNNER_TEMP/kubeconform.tar.gz" \
+            "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  $RUNNER_TEMP/kubeconform.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/kubeconform.tar.gz" -C "$RUNNER_TEMP" kubeconform
+          sudo install "$RUNNER_TEMP/kubeconform" /usr/local/bin/kubeconform
+          kubeconform -v
+      # What Argo CD syncs. -strict rejects unknown or duplicated fields (typos in our manifests).
+      - name: k8s/ (application manifests)
+        run: |
+          kustomize build k8s \
+            | kubeconform -strict -summary -kubernetes-version "$KUBERNETES_VERSION"
+      - name: argocd/healthqueue-app.yaml (Argo CD Application)
+        run: |
+          kubeconform -strict -summary -kubernetes-version "$KUBERNETES_VERSION" \
+            -schema-location default -schema-location "$CRD_SCHEMAS" \
+            argocd/healthqueue-app.yaml
+      # The upstream Argo CD install plus our patches. Not -strict, so upstream quirks don't fail
+      # the job; resources whose CRDs have no published schema are skipped rather than failed.
+      - name: argocd/ (Argo CD install + resource patches)
+        run: |
+          kustomize build argocd \
+            | kubeconform -summary -ignore-missing-schemas -kubernetes-version "$KUBERNETES_VERSION" \
+                -schema-location default -schema-location "$CRD_SCHEMAS"

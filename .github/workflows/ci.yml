@@ -7,6 +7,9 @@
 # Pull requests run everything up to (and including) the image scan + SBOM, but never push or sign.
 # Pushes to main additionally publish, sign, attest, and bump the Kubernetes manifest for Argo CD.
 #
+# Config checks (promtool, tofu validate, kubeconform) live in validate.yml, which also runs on the
+# docs/observability changes this workflow skips.
+#
 # All third-party actions are pinned to full commit SHAs (tag shown in the comment) so a moved or
 # hijacked tag cannot inject code into the pipeline. Dependabot keeps these pins up to date.
 

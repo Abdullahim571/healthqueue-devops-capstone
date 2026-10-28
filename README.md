@@ -99,6 +99,16 @@ Pull requests run everything up to the image scan and SBOM, but never publish or
 only under `docs/`, `observability/` or `*.md` don't run the pipeline, so they don't redeploy.
 The gate works: commit `2b0e5de` failed unit tests and was never published.
 
+A second workflow, [`.github/workflows/validate.yml`](.github/workflows/validate.yml), checks the
+configuration on **every** push and PR, including the `observability/` changes the main pipeline
+skips. It builds and publishes nothing:
+
+| Job | Checks |
+|---|---|
+| Prometheus rules | `promtool check rules` + `promtool test rules` (alert unit tests) |
+| OpenTofu | `tofu fmt -check`, `tofu init -lockfile=readonly`, `tofu validate` |
+| Kubernetes | `kustomize build` of `k8s/` and `argocd/`, then `kubeconform` schema checks against Kubernetes 1.34 |
+
 ## Infrastructure as code (OpenTofu)
 
 [`infra/`](infra/) provisions the API on the local Docker Engine: a private bridge network, a named
@@ -199,6 +209,20 @@ validated before committing.
 | `gitops-bump` pushed from the triggering commit with a plain `git push` | Docs-only commits skip CI, so they can land on `main` during a run; the deploy push was then rejected as non-fast-forward and the release never reached the cluster | Check out the tip of `main`; on rejection, fetch, rebase the one-line deploy commit and retry (up to 3 times) | The real `run:` script, extracted from `ci.yml`, run against local throwaway Git repos: a commit landing mid-run is rebased over and the push succeeds on attempt 2 |
 | `cd k8s && kustomize edit ... && cd ..` | `bash -e` ignores failures inside `&&` chains, so a kustomize error printed "No change" and the job went **green without deploying** (found by the test above) | Run the commands separately so any failure fails the job | Same harness with a failing `kustomize` stub: the job now exits 1 and nothing is pushed |
 | `actions/checkout` left the job token in `.git/config` | Any later step (including third-party actions) could read and reuse it | `persist-credentials: false` on every checkout except `gitops-bump`, which needs it to push | Resolved `with:` inputs of every checkout step inspected |
+
+### Group 2: Enforce the validation the docs already claimed
+
+| Problem found | Why it mattered | Fix | How it was validated |
+|---|---|---|---|
+| The 34 Prometheus rules were "unit-tested with `promtool`", but only by hand; `observability/**` is skipped by `ci.yml` | A broken rule or a failing alert test could be merged unnoticed | New `validate.yml` workflow runs `promtool check rules` and `promtool test rules` on every push and PR | Workflow parsed; promtool runs on GitHub's runner (not installed locally) |
+| `tofu fmt` / `tofu validate` only in `infra/README.md` instructions | Formatting drift or invalid HCL only found at the next manual `plan` | `opentofu` job: `fmt -check`, `init -backend=false -lockfile=readonly` (also catches a stale lock file), `validate`. No state is touched, so **no passphrase or secret is needed** | Same commands run locally on a scratch copy of `infra/`: fmt clean, init OK with the read-only lock file, `Success! The configuration is valid.` |
+| Kubernetes and Argo CD manifests were never schema-checked | A typo in `k8s/` would only surface as a failed Argo CD sync, after it reached `main` | `kubernetes` job: `kustomize build` of `k8s/` and `argocd/`, then `kubeconform` against Kubernetes 1.34 (the kind node version), with `-strict` for project manifests and the Argo CD `Application` CRD schema | Both kustomize builds render locally (3 project resources; 60 Argo CD resources with the patches applied); kubeconform runs on GitHub's runner |
+| New tools have to be downloaded in CI | An unpinned download is a supply-chain hole | promtool 3.15.1 and kubeconform 0.8.0 pinned by version **and sha256** (copied from each project's published checksum file); `setup-opentofu` pinned to a commit SHA like every other action | Checksum gate tested locally: a matching file passes; a tampered file fails the step before anything is installed |
+
+Validation runs in its own workflow so rule and doc changes are checked without rebuilding or
+redeploying the image. Once branch protection is enabled (roadmap item 1 in the
+[supply chain summary](docs/supply-chain-security.md#6-roadmap-not-implemented)), its three jobs
+should be required status checks.
 
 ## Known limitations
 
