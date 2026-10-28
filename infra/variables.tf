@@ -54,6 +54,28 @@ variable "host_port" {
   }
 }
 
+variable "memory_limit_mb" {
+  description = "Hard memory limit for the API container, in MB. Default matches the 192Mi limit in k8s/deployment.yaml."
+  type        = number
+  default     = 192
+
+  validation {
+    condition     = var.memory_limit_mb >= 64 && var.memory_limit_mb <= 2048
+    error_message = "memory_limit_mb must be between 64 and 2048."
+  }
+}
+
+variable "cpu_limit" {
+  description = "Maximum CPUs the API container may use, as a decimal string (e.g. \"0.5\"). Default matches the 500m limit in k8s/deployment.yaml."
+  type        = string
+  default     = "0.5"
+
+  validation {
+    condition     = can(tonumber(var.cpu_limit)) && try(tonumber(var.cpu_limit) > 0 && tonumber(var.cpu_limit) <= 4, false)
+    error_message = "cpu_limit must be a number greater than 0 and at most 4, e.g. \"0.5\"."
+  }
+}
+
 variable "network_subnet" {
   description = "CIDR for the private bridge network."
   type        = string

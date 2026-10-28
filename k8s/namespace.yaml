@@ -4,6 +4,10 @@ metadata:
   name: healthqueue
   labels:
     # Reject any pod that does not meet the "restricted" Pod Security Standard.
+    # Pinned to the cluster's Kubernetes minor (kind node v1.34.0) instead of "latest", so a cluster
+    # upgrade can't tighten the policy and start rejecting pods without a reviewed change in Git.
+    # "warn" tracks latest on purpose: it flags what a future version would reject, without blocking.
     pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/enforce-version: v1.34
     pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest

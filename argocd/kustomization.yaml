@@ -1,7 +1,8 @@
 # Lean Argo CD install for the local "healthqueue" kind cluster.
 #   kubectl --context kind-healthqueue apply --server-side --force-conflicts -k argocd/
 #
-# Upstream install pinned to a release tag, then trimmed to fit a small Docker Desktop VM:
+# Upstream install pinned to the COMMIT behind the v3.5.6 release tag (tags can be moved; a commit
+# SHA can't), then trimmed to fit a small Docker Desktop VM:
 #   - dex (SSO), notifications and ApplicationSet controllers are scaled to 0 (not needed here)
 #   - the remaining components get memory requests/limits so they cannot starve other clusters
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -10,7 +11,9 @@ namespace: argocd
 
 resources:
   - namespace.yaml
-  - https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.6/manifests/install.yaml
+  # v3.5.6 = c2b1e3017e2cec86b122172e861dcd026453ae44. To upgrade, resolve the new tag's commit:
+  #   curl -s https://api.github.com/repos/argoproj/argo-cd/commits/<tag> | jq -r .sha
+  - https://raw.githubusercontent.com/argoproj/argo-cd/c2b1e3017e2cec86b122172e861dcd026453ae44/manifests/install.yaml
 
 patches:
   - target: {kind: Deployment, name: argocd-dex-server}

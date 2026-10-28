@@ -36,7 +36,8 @@ resource "docker_network" "app" {
   }
 }
 
-# 2) Named volume for application data (reserved for the future database layer).
+# 2) Named volume reserved for the future database layer (unused by the in-memory app today;
+#    mounted read-only in the container below).
 resource "docker_volume" "data" {
   name = "${var.name_prefix}-${var.environment}-data"
 
@@ -69,7 +70,8 @@ resource "docker_image" "api" {
 }
 
 # 4) API container, hardened: non-root (from the image), read-only rootfs,
-#    all Linux capabilities dropped, no privilege escalation, loopback-only port.
+#    all Linux capabilities dropped, no privilege escalation, loopback-only port,
+#    and CPU/memory limits matching the Kubernetes Deployment (k8s/deployment.yaml).
 resource "docker_container" "api" {
   name    = "${var.name_prefix}-${var.environment}-api"
   image   = docker_image.api.image_id
@@ -77,8 +79,12 @@ resource "docker_container" "api" {
 
   env = [
     "APP_VERSION=${var.image_tag}",
-    "DATA_DIR=/data",
   ]
+
+  # A runaway request or memory leak can't starve Docker Desktop (and the kind cluster beside it).
+  # memory_swap is left unset on purpose: the provider may read it back as -1 and report drift.
+  memory = var.memory_limit_mb
+  cpus   = var.cpu_limit
 
   ports {
     internal = 8000
@@ -90,9 +96,12 @@ resource "docker_container" "api" {
     name = docker_network.app.id
   }
 
+  # Reserved for the future database layer. The app keeps data in memory today and never reads
+  # /data, so the mount is read-only until something actually needs to write there.
   volumes {
     volume_name    = docker_volume.data.name
     container_path = "/data"
+    read_only      = true
   }
 
   read_only     = true

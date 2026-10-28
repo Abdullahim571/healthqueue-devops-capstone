@@ -63,6 +63,14 @@ def test_double_booking_rejected(client):
     assert book(client, patient_id="P-1002", start_time=t).status_code == 409
 
 
+def test_double_booking_does_not_leak_other_appointment(client):
+    t = future()
+    first = book(client, start_time=t).json()
+    r = book(client, patient_id="P-1002", start_time=t)
+    assert r.status_code == 409
+    assert first["id"] not in r.text
+
+
 def test_different_provider_same_time_allowed(client):
     t = future()
     assert book(client, start_time=t).status_code == 201

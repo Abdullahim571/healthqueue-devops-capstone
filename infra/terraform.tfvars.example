@@ -1,6 +1,8 @@
 # Copy to terraform.tfvars (gitignored) to override defaults.
 # Do NOT put state_passphrase here; set it with TF_VAR_state_passphrase instead.
-environment    = "dev"
-image_tag      = "tofu"
-host_port      = 8000
-network_subnet = "172.28.0.0/24"
+environment     = "dev"
+image_tag       = "tofu"
+host_port       = 8000
+network_subnet  = "172.28.0.0/24"
+memory_limit_mb = 192   # match k8s/deployment.yaml limits
+cpu_limit       = "0.5" # 500m

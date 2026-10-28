@@ -85,7 +85,7 @@ gaps worth stating openly:
 | Area | Current state | Risk |
 |---|---|---|
 | Source protection | Branch protection **off**, no required PR review, no required status checks, unsigned commits, single maintainer | A compromised account or a mistake reaches `main` (and production) without a second person |
-| Dependency integrity | Versions pinned, but **no hash pinning** (`--require-hashes`); base image `python:3.13-slim` pinned by **tag, not digest** | A tampered or re-tagged upstream artifact would still be accepted; builds aren't fully reproducible |
+| Dependency integrity | Versions pinned, but **no hash pinning** (`--require-hashes`). *Week 8:* base image now pinned by digest | A tampered upstream Python package would still be accepted; builds aren't fully reproducible |
 | Deploy-time verification | Argo CD deploys any digest committed to `main`. **Nothing in the cluster verifies the signature or provenance** before running the image | Signing proves where an image came from, but the cluster doesn't enforce it |
 | Code scanning upload | SARIF upload to the GitHub Security tab is `continue-on-error` | Findings may not reach the Security tab; the Trivy gate still fails the build |
 
@@ -113,7 +113,7 @@ gaps worth stating openly:
 | Build integrity and provenance | **High**: SLSA Build L3 aligned | §1 verified provenance, §3 |
 | Artifact signing and SBOM | **High** | Keyless signing + SPDX attestation, verified in CI and independently |
 | Vulnerability management | **Medium–High** | Gates on HIGH/CRITICAL; no runtime or continuous rescanning of deployed images |
-| Dependency integrity | **Medium** | Exact pins + Dependabot; no hashes, base image not digest-pinned |
+| Dependency integrity | **Medium** | Exact pins + Dependabot; base image digest-pinned (Week 8); no Python package hashes |
 | Source protection | **Low** | Branch protection off, no reviews, unsigned commits |
 | Deploy-time enforcement | **Low** | Digest pinning and GitOps, but no signature verification at admission |
 
@@ -124,7 +124,7 @@ gaps worth stating openly:
 Ordered by risk reduced per unit of effort:
 
 1. **Protect `main`:** require a pull request with review and passing `test` / `scan-source` / `build` checks; block force-pushes. (Free on public repos.) The `gitops-bump` bot needs a bypass or a dedicated deploy branch.
-2. **Pin the base image by digest** (`FROM python:3.13-slim@sha256:…`); Dependabot keeps the digest current.
+2. ~~**Pin the base image by digest**~~ **Done in Week 8:** `FROM python:3.13-slim@sha256:…`; Dependabot keeps the digest current.
 3. **Hash-pin Python dependencies** (`pip-compile --generate-hashes`, `pip install --require-hashes`).
 4. **Verify at admission:** Sigstore policy-controller or Kyverno `verifyImages` in the cluster, requiring a signature from the `ci.yml` identity **and** SLSA provenance from the generator before a pod can start.
 5. **Remove the L3 caveat:** no shared GHA cache for release builds.
@@ -138,7 +138,7 @@ No install needed, just Docker. Replace the digest with the one in `k8s/kustomiz
 
 ```bash
 REF=ghcr.io/abdullahim571/healthqueue-devops-capstone@sha256:<digest>
-COSIGN="docker run --rm ghcr.io/sigstore/cosign/cosign:latest"
+COSIGN="docker run --rm ghcr.io/sigstore/cosign/cosign:v3.1.4"  # the version used for §1
 ISSUER=https://token.actions.githubusercontent.com
 CI_ID=https://github.com/Abdullahim571/healthqueue-devops-capstone/.github/workflows/ci.yml@refs/heads/main
 

@@ -12,7 +12,7 @@ GitOps delivery to Kubernetes with Argo CD, and an observability plan with SLOs.
 | 1 | CI/CD: automated build, test, security scanning, SBOM, signing | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | All 7 jobs green on the last 3 pushes to `main`; 13/13 unit tests pass; image signature, SBOM attestation and SLSA provenance verified independently with cosign |
 | 2 | OpenTofu: ≥ 2 resources with state management | [`infra/`](infra/) | 4 resources (network, volume, image, container); encrypted state; `tofu validate` passes and `tofu plan` reports **No changes** |
 | 3 | Containerized app on Kubernetes via GitOps | [`k8s/`](k8s/), [`argocd/`](argocd/), [`cluster/`](cluster/) | Argo CD **Synced / Healthy**; 2 automated deployments, each **~4–5 min from commit to running pod** |
-| 4 | Observability plan: SLIs, SLOs, error budget | [`docs/monitoring-plan.md`](docs/monitoring-plan.md), [`observability/`](observability/) | 99.5 % availability / 95 % ≤ 300 ms SLOs; 30-day budget **216 min**; 34 alert rules pass `promtool` unit tests |
+| 4 | Observability plan: SLIs, SLOs, error budget | [`docs/monitoring-plan.md`](docs/monitoring-plan.md), [`observability/`](observability/) | 99.5 % availability / 95 % ≤ 300 ms SLOs; 30-day budget **216 min**; 34 Prometheus rules (19 recording, 15 alerts) pass `promtool` unit tests, enforced in CI |
 | 5 | DORA baseline from 90 days of synthetic data | [`docs/dora-baseline.md`](docs/dora-baseline.md), [`docs/dora/`](docs/dora/) | Reproducible, seeded generator + metrics script; **synthetic** results clearly separated from real measurements |
 | 6 | Supply chain security summary, SLSA alignment | [`docs/supply-chain-security.md`](docs/supply-chain-security.md) | Provenance verified as signed by the SLSA generator; Build L3 alignment (**self-assessed**) with gaps listed |
 
@@ -53,12 +53,22 @@ flowchart LR
 
 ## Run locally
 
-```bash
+```powershell
+# Windows (PowerShell)
 python -m venv .venv
-.venv\Scripts\activate            # Windows  (Linux/macOS: source .venv/bin/activate)
+.venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
 pytest -v                          # run tests
 uvicorn app.main:app --reload      # http://localhost:8000/docs
+```
+
+```bash
+# Linux / macOS
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest -v
+uvicorn app.main:app --reload
 ```
 
 With Docker:
@@ -126,7 +136,7 @@ Usage, variables and outputs: [infra/README.md](infra/README.md).
 | Path | Contents |
 |---|---|
 | `cluster/kind-config.yaml` | Single-node kind cluster named `healthqueue` |
-| `argocd/kustomization.yaml` | Argo CD v3.5.6, trimmed (no dex / notifications / ApplicationSet) with memory limits |
+| `argocd/kustomization.yaml` | Argo CD v3.5.6 (pinned to the release commit), trimmed (no dex / notifications / ApplicationSet) with memory limits |
 | `argocd/healthqueue-project.yaml` | Least-privilege AppProject: only this repo, only the `healthqueue` namespace, only the resource kinds in `k8s/` |
 | `argocd/healthqueue-app.yaml` | Argo CD Application syncing `k8s/` from `main` (auto-sync, prune, self-heal) |
 | `k8s/` | Namespace (restricted Pod Security), Deployment, Service, NetworkPolicies (default deny + HTTP only); image pinned by digest |
@@ -185,12 +195,12 @@ Full summary: **[docs/supply-chain-security.md](docs/supply-chain-security.md)**
 
 - Verified on 2026-10-24 for the deployed image: the cosign **signature** and **SPDX SBOM attestation** (both signed by the `ci.yml` workflow identity), and **SLSA provenance** signed by the isolated `slsa-github-generator`.
 - **Self-assessed** SLSA v1.0 **Build L3** alignment, with one caveat (shared build cache).
-- Known gaps: no branch protection, base image not pinned by digest, no hash-pinned dependencies, no signature enforcement in the cluster. A prioritised roadmap is in the summary.
+- Known gaps: no branch protection, no hash-pinned Python dependencies, no signature enforcement in the cluster. (The base image is digest-pinned since Week 8.) A prioritised roadmap is in the summary.
 
 Verify a published image yourself (Docker only, no install):
 
 ```bash
-docker run --rm ghcr.io/sigstore/cosign/cosign:latest verify \
+docker run --rm ghcr.io/sigstore/cosign/cosign:v3.1.4 verify \
   ghcr.io/abdullahim571/healthqueue-devops-capstone@sha256:<digest> \
   --certificate-identity https://github.com/Abdullahim571/healthqueue-devops-capstone/.github/workflows/ci.yml@refs/heads/main \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
@@ -292,8 +302,30 @@ target the built image; and `sign`, `attest`, `verify`, `provenance` and `gitops
 `steps.push.outputs.digest`. The Group 1 `gitops-bump` tests and all 13 unit tests still pass. The
 first real end-to-end run happens on GitHub after push.
 
+### Group 5: Pinning, resource limits, cleanup and documentation accuracy
+
+| Area | Problem found | Fix | How it was validated |
+|---|---|---|---|
+| **Argo CD install** | `argocd/kustomization.yaml` fetched `install.yaml` by the `v3.5.6` **tag**, which upstream can move | Pinned to the tag's commit `c2b1e30…` (resolved through the GitHub API); upgrade command documented inline | Rendered output is **byte-identical** to the tag-based build (same sha256), so the running Argo CD is unchanged |
+| **Base image** | `python:3.13-slim` pinned by tag only (an open gap in the supply chain summary) | Both stages pinned to `@sha256:2d44738e…` (multi-arch index), Dependabot keeps it current | Digest read from Docker Hub and cross-checked against `registry-1.docker.io` (identical) |
+| **Dockerfile** | `rm -rf /usr/local/lib/python3.13/ensurepip` would silently stop matching after a Python minor upgrade | Ask Python where `ensurepip` lives; also added `--start-period=10s` to `HEALTHCHECK` (matches OpenTofu's) | One-liner checked on local Python 3.13; image build runs in CI |
+| **Pod Security** | `enforce-version: latest`: a cluster upgrade could start rejecting pods with no change in Git | `enforce-version: v1.34` (the kind node version); `warn-version: latest` still flags future problems without blocking | Rendered namespace labels checked |
+| **OpenTofu limits** | The "hardened" container had **no CPU or memory limit**, unlike the Kubernetes Deployment | `memory = 192` MB and `cpus = "0.5"`, as validated variables `memory_limit_mb` / `cpu_limit` matching `k8s/deployment.yaml`. `memory_swap` deliberately left unset (the provider may read it back as `-1` and report drift) | Attributes confirmed against the cached provider's schema (kreuzwerker/docker 3.9.0); `fmt` clean; `validate` passes; plan-time validation accepts `0.5`, `1.5`, `192` and rejects `abc`, `0`, `8`, `32`, `4096` |
+| **Unused config** | `DATA_DIR=/data` was set but never read by the app; the volume was mounted read-write but is root-owned (UID 10001 couldn't write anyway) | Removed `DATA_DIR`; volume kept as reserved for the database layer but mounted **read-only**, with comments in `main.tf` and `infra/README.md` | `tofu validate` |
+| **API privacy** | The 409 double-booking error echoed the **other patient's** appointment ID | Generic message; same 409 status and behaviour | New test `test_double_booking_does_not_leak_other_appointment` (14/14 pass) |
+| **Test deps** | `StarletteDeprecationWarning`: Starlette 1.9's `TestClient` wants `httpx2` | `httpx==0.28.1` → `httpx2==2.16.0` (pydantic/httpx2) in `requirements-dev.txt` | `pytest -W error` (warnings fail the run): 14 passed, 0 warnings, also with the old `httpx` made unimportable to mimic a clean CI install |
+| **Build context** | `.dockerignore` sent `.github/`, `argocd/`, `cluster/`, `observability/`, Markdown, SBOMs to the builder | Excluded everything except what the Dockerfile copies | `COPY` sources (`requirements.txt`, `app/`) are not excluded |
+| **Docs accuracy** | "34 alert rules" (actually 19 recording + 15 alerts); "Run locally" mixed Windows paths into a `bash` block; verify commands used `cosign:latest`; no mention that the API has **no authentication** | Corrected count; separate PowerShell and Linux/macOS blocks; `cosign:v3.1.4` (the version used for the recorded verification); new *Known limitations* entry on auth; supply chain summary updated (base-image gap closed, roadmap item 2 done) | Reviewed against the code |
+
+**Effect on the running environments when applied** (nothing has been applied yet):
+
+- **OpenTofu:** the next `tofu apply` **replaces** `docker_container.api` (limits, env and mount changes) and rebuilds the image (Dockerfile changed). Expect a few seconds of downtime on `127.0.0.1:8000`, and in-memory appointments are lost, as with any restart.
+- **Kubernetes:** pushing changes the namespace labels (applied in place, no pod restart). The Dockerfile change produces a new image digest, which `gitops-bump` rolls out through Argo CD as a normal deploy.
+- The Argo CD install itself is unchanged (identical render).
+
 ## Known limitations
 
+- **No authentication or authorization:** any client that can reach the API can list patients and book or cancel appointments, and `/docs` is public. That's acceptable here only because the data is fictional and the service is reachable only via loopback / ClusterIP. A real deployment would need an identity provider (OIDC), role-based access to patient records, and audit logging before handling PHI.
 - **Single replica with an in-memory store:** a pod restart is an outage and loses appointments. Next step: a shared database and ≥ 2 replicas.
 - **Local environment:** kind and Docker Desktop on one machine. The monitoring stack is planned but not installed.
 - **Source protection:** `main` is not branch-protected and commits are unsigned (see the supply chain summary).

@@ -88,8 +88,9 @@ def create_appointment(body: AppointmentCreate):
         raise HTTPException(422, "start_time must be in the future")
     try:
         return store.create_appointment(body)
-    except SlotConflictError as e:
-        raise HTTPException(409, f"Provider already booked (conflicts with {e})")
+    except SlotConflictError:
+        # Don't echo the conflicting appointment's ID: it belongs to another patient.
+        raise HTTPException(409, "Provider already booked for an overlapping time slot")
 
 
 @app.delete("/appointments/{appt_id}", response_model=Appointment)

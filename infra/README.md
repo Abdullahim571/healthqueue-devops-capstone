@@ -5,9 +5,9 @@ Provisions the HealthQueue API on the local Docker Engine at **$0 cost**: no clo
 | Resource | Name | Purpose |
 |---|---|---|
 | `docker_network.app` | `healthqueue-dev-net` | Private bridge network (`172.28.0.0/24`) |
-| `docker_volume.data` | `healthqueue-dev-data` | Persistent data, mounted at `/data` |
+| `docker_volume.data` | `healthqueue-dev-data` | Reserved for a future database; mounted **read-only** at `/data` (the app keeps data in memory today) |
 | `docker_image.api` | `healthqueue-api:tofu` | Built from the project `Dockerfile`; rebuilt when `app/`, `Dockerfile` or `requirements.txt` change |
-| `docker_container.api` | `healthqueue-dev-api` | Hardened API container on `127.0.0.1:8000` |
+| `docker_container.api` | `healthqueue-dev-api` | Hardened API container on `127.0.0.1:8000`, limited to 192 MB memory and 0.5 CPU (`memory_limit_mb`, `cpu_limit`; same as Kubernetes) |
 
 ## State management
 

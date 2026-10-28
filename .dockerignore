@@ -1,9 +1,19 @@
+# The Dockerfile only COPYs requirements.txt and app/. Everything else is excluded so it isn't sent
+# to the builder (smaller, faster context) and can't leak into a layer by accident.
 .venv
 .git
+.github
 .pytest_cache
 __pycache__
 *.pyc
 tests
 infra
 k8s
+argocd
+cluster
+observability
 docs
+reports
+*.md
+sbom*.json
+*.sarif
