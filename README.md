@@ -86,10 +86,10 @@ docker run -p 8000:8000 healthqueue-api:dev
 |---|---|---|
 | Unit tests | pytest | any failure |
 | Source scan | Trivy fs (deps, secrets, IaC misconfig) | HIGH/CRITICAL |
-| Build | Docker Buildx (multi-stage, non-root, no pip at runtime) | — |
+| Build | Docker Buildx, **once** (multi-stage, non-root, no pip at runtime) | — |
 | Image scan | Trivy image (+ SARIF to Security tab) | HIGH/CRITICAL with a fix |
 | SBOM | Syft (SPDX + CycloneDX) | — |
-| Publish | GHCR, by digest | main only |
+| Publish | GHCR: the scanned image is pushed as-is (no rebuild); the registry manifest is checked against the scanned image ID | main only |
 | Sign | cosign keyless (Sigstore / GitHub OIDC) | main only |
 | Attest | cosign SBOM attestation + SLSA L3 provenance | main only |
 | Verify | `cosign verify` / `verify-attestation` | main only |
@@ -242,6 +242,55 @@ without another policy. A future database needs its own egress policy (plus DNS 
 current project. Then run `kubectl apply -f argocd/healthqueue-project.yaml -f argocd/healthqueue-app.yaml`
 (project first) to move the Application into the new project. To verify afterwards: Application is
 `Synced/Healthy`, the pod is `Ready`, and `curl` through `kubectl port-forward` returns `/healthz`.
+
+### Group 4: The deployed digest is the artifact that passed the gates
+
+**Before:** the `build` job built the image twice. A local build was scanned by Trivy and
+documented with an SBOM, then a second `build-push-action` run rebuilt it and pushed it. The second
+build added OCI labels the first didn't have, so the published image config, and therefore the
+digest that was signed and deployed, was **not** the one that was scanned. "Same inputs and a warm
+cache" made the layers *probably* identical, but nothing checked it, and the SBOM attestation was
+attached to a digest it wasn't generated from.
+
+**After:**
+
+```
+build ONCE (final tags + labels, loaded into the runner)  ──► image ID = config digest (fixes every layer)
+   ├─► Trivy gate + SARIF       (same image)
+   ├─► Syft SBOM SPDX + CycloneDX (same image)
+   └─► main only: push that image (no rebuild) ──► verify registry manifest → scanned image ID
+                                                   └─► digest ─► cosign sign ─► SBOM attest ─► verify
+                                                               ─► SLSA provenance ─► gitops-bump ─► Argo CD
+```
+
+| Change | Why |
+|---|---|
+| The single build gets the final registry tags and labels, plus `provenance: false` and `sbom: false` (provenance comes from the SLSA job, SBOMs from Syft) | So the scanned image *is* the release image, with nothing added afterwards |
+| The second `build-push-action` was replaced by `docker push --all-tags` of the already-built image | Publishing can no longer change the artifact |
+| Before pushing: fail if `healthqueue-api:ci` no longer resolves to the image ID recorded at build time | Catches a later step re-tagging the image between scan and push |
+| After pushing: fetch the manifest from GHCR and fail unless it references the scanned image ID (or *is* it, with the containerd image store) | Proves the registry holds the scanned artifact before anything is signed or deployed |
+| The job summary prints the scanned image ID, the manifest digest and the config it references | An auditable record linking "scanned" to "deployed" on every run |
+
+Not changed: the scanners, SBOM formats, signing, attestation, in-pipeline verification, SLSA
+provenance and `gitops-bump`. They all still consume the same `digest` output. Pull requests still
+build, scan and generate SBOMs, but never push.
+
+**Validation.** Docker isn't running on the dev machine, so the real `run:` script was extracted
+from `ci.yml` and run against a stubbed `docker` CLI:
+
+| Scenario | Expected | Result |
+|---|---|---|
+| Classic Docker store: registry manifest references the scanned config | publish, output digest | ✅ exit 0, digest output, summary written |
+| containerd store: registry digest equals the image ID | publish | ✅ exit 0 |
+| Image re-tagged after the scan | refuse, **no push** | ✅ exit 1, push never called |
+| Registry serves a manifest with a different config | fail, **no digest** (nothing signed or deployed) | ✅ exit 1 |
+| Push recorded no registry digest | fail | ✅ exit 1 |
+| Build produced no image ID | refuse, **no push** | ✅ exit 1 |
+
+Also verified: the workflow parses; the build job has exactly one build step; the scan and SBOM steps
+target the built image; and `sign`, `attest`, `verify`, `provenance` and `gitops-bump` still read
+`steps.push.outputs.digest`. The Group 1 `gitops-bump` tests and all 13 unit tests still pass. The
+first real end-to-end run happens on GitHub after push.
 
 ## Known limitations
 

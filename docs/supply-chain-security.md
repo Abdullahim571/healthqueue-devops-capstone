@@ -55,6 +55,7 @@ Other verified facts:
 | **Build** | Ephemeral GitHub-hosted runners; multi-stage Docker build | `build` job, `Dockerfile` |
 | | Image hardening: non-root UID 10001, pip removed from runtime image | `Dockerfile` |
 | | **Scan before publish**: image built locally, scanned by Trivy, pushed only if the gate passes | `build` job |
+| | **Build once, publish the scanned artifact** (added Week 8): no second build; the push step checks that the registry manifest references the scanned image ID before the digest is signed or deployed | `build` job, `push` step |
 | **Artifacts** | SBOM in SPDX and CycloneDX (Syft); SPDX attached as a signed in-toto attestation | `build` job |
 | | Keyless signing with cosign (GitHub OIDC → Fulcio certificate → Rekor log); no long-lived keys | `build` job |
 | | Signature + SBOM attestation **verified inside the pipeline** before it continues | `build` job, last step |
