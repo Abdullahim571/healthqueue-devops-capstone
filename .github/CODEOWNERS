@@ -1,0 +1,13 @@
+# Code owners are requested for review automatically on every pull request.
+# They become *required* reviewers once branch protection enables "Require review from Code Owners"
+# (roadmap item 1 in docs/supply-chain-security.md).
+
+# Default: everything
+*                       @Abdullahim571
+
+# Security-sensitive paths, listed explicitly so a future team can assign stricter owners here.
+/.github/               @Abdullahim571
+/Dockerfile             @Abdullahim571
+/infra/                 @Abdullahim571
+/k8s/                   @Abdullahim571
+/argocd/                @Abdullahim571

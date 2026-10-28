@@ -1,11 +1,17 @@
 # HealthQueue CI/CD pipeline
 #
-#   test ─┐
-#         ├─> build → scan → SBOM → push → sign → attest ─┬─> SLSA provenance ─> gitops-bump
-#   scan-source ┘                                         └──────────────────────┘
+#   job           runs on    steps
+#   ───────────   ────────   ──────────────────────────────────────────────────────────────────
+#   test          PR + main  ruff lint/format → pytest (coverage ≥ 95 %)
+#   scan-source   PR + main  Trivy fs: vulnerable deps, committed secrets, IaC misconfig
+#   build         PR + main  build ONCE → Trivy image gate → SBOM (SPDX + CycloneDX)
+#     (needs test,           └ main only: push that image → check registry digest = scanned
+#      scan-source)            image → cosign sign → SBOM attest → verify
+#   provenance    main only  SLSA L3 provenance for the pushed digest (isolated generator)
+#   gitops-bump   main only  commit the digest to k8s/kustomization.yaml → Argo CD syncs it
+#     (needs build + provenance)
 #
-# Pull requests run everything up to (and including) the image scan + SBOM, but never push or sign.
-# Pushes to main additionally publish, sign, attest, and bump the Kubernetes manifest for Argo CD.
+# Pull requests stop after the scans + SBOM: nothing is pushed, signed or deployed.
 #
 # Config checks (promtool, tofu validate, kubeconform) live in validate.yml, which also runs on the
 # docs/observability changes this workflow skips.
@@ -38,7 +44,7 @@ env:
 
 jobs:
   test:
-    name: Unit tests
+    name: Lint + unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,7 +56,18 @@ jobs:
           cache: pip
           cache-dependency-path: requirements*.txt
       - run: pip install -r requirements-dev.txt
-      - run: pytest -v --junitxml=reports/junit.xml
+      # Lint rules and formatter settings live in ruff.toml (same version as the pre-commit hook).
+      - name: Ruff (lint + format check)
+        run: |
+          ruff check --output-format=github .
+          ruff format --check .
+      # -W error: a new deprecation warning fails CI instead of piling up unnoticed.
+      # Coverage is 100 % today; the 95 % floor stops untested code from slipping in.
+      - name: Pytest with coverage
+        run: |
+          pytest -v -W error --junitxml=reports/junit.xml \
+            --cov=app --cov-report=term-missing --cov-report=xml:reports/coverage.xml \
+            --cov-fail-under=95
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

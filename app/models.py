@@ -1,11 +1,12 @@
 """Request/response schemas for the HealthQueue scheduling API."""
+
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class AppointmentStatus(str, Enum):
+class AppointmentStatus(StrEnum):
     scheduled = "scheduled"
     cancelled = "cancelled"
 

@@ -11,3 +11,8 @@ __pycache__/
 # Supply-chain outputs generated in CI
 sbom*.json
 cosign.key
+# Tool caches and test/coverage reports
+.ruff_cache/
+.coverage
+coverage.xml
+reports/

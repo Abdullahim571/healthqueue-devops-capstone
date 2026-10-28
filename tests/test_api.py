@@ -1,7 +1,8 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from prometheus_client import REGISTRY
 
 from app import main
 from app.store import Store
@@ -14,7 +15,7 @@ def client():
 
 
 def future(hours=24):
-    return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+    return (datetime.now(UTC) + timedelta(hours=hours)).isoformat()
 
 
 def book(client, **overrides):
@@ -71,6 +72,21 @@ def test_double_booking_does_not_leak_other_appointment(client):
     assert first["id"] not in r.text
 
 
+def test_back_to_back_same_provider_allowed(client):
+    # A 30-minute slot ends exactly when the next one starts: touching is not overlapping.
+    start = datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)
+    assert book(client, start_time=start.isoformat(), duration_minutes=30).status_code == 201
+    nxt = (start + timedelta(minutes=30)).isoformat()
+    assert book(client, patient_id="P-1002", start_time=nxt).status_code == 201
+
+
+def test_one_minute_overlap_rejected(client):
+    start = datetime.now(UTC).replace(microsecond=0) + timedelta(days=1)
+    assert book(client, start_time=start.isoformat(), duration_minutes=30).status_code == 201
+    overlap = (start + timedelta(minutes=29)).isoformat()
+    assert book(client, patient_id="P-1002", start_time=overlap).status_code == 409
+
+
 def test_different_provider_same_time_allowed(client):
     t = future()
     assert book(client, start_time=t).status_code == 201
@@ -101,3 +117,25 @@ def test_metrics_exposed(client):
     client.get("/healthz")
     body = client.get("/metrics").text
     assert 'http_requests_total{method="GET",route="/healthz",status="200"}' in body
+
+
+def test_unknown_paths_share_one_metric_label(client):
+    # Raw paths must never become label values (unbounded cardinality, IDs leaking into metrics).
+    labels = {"method": "GET", "route": "unmatched", "status": "404"}
+    before = REGISTRY.get_sample_value("http_requests_total", labels) or 0.0
+    client.get("/does-not-exist")
+    client.get("/also/missing/A-12345")
+    assert REGISTRY.get_sample_value("http_requests_total", labels) == before + 2
+    body = client.get("/metrics").text
+    assert "does-not-exist" not in body and "A-12345" not in body
+
+
+def test_metrics_not_counted_in_sli(client):
+    client.get("/metrics")
+    assert 'route="/metrics"' not in client.get("/metrics").text
+
+
+def test_status_serialises_as_plain_string(client):
+    appt = book(client).json()
+    assert appt["status"] == "scheduled"
+    assert client.delete(f"/appointments/{appt['id']}").json()["status"] == "cancelled"

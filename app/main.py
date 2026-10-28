@@ -1,7 +1,8 @@
 """HealthQueue appointment scheduling API."""
+
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
@@ -15,9 +16,7 @@ app = FastAPI(title="HealthQueue Scheduling API", version=APP_VERSION)
 store = Store()
 
 # --- Metrics used for SLIs (availability + latency) ---
-REQUESTS = Counter(
-    "http_requests_total", "HTTP requests", ["method", "route", "status"]
-)
+REQUESTS = Counter("http_requests_total", "HTTP requests", ["method", "route", "status"])
 LATENCY = Histogram(
     "http_request_duration_seconds",
     "HTTP request latency",
@@ -84,13 +83,13 @@ def create_appointment(body: AppointmentCreate):
         raise HTTPException(404, "Patient not found")
     if body.start_time.tzinfo is None:
         raise HTTPException(422, "start_time must include a timezone")
-    if body.start_time <= datetime.now(timezone.utc):
+    if body.start_time <= datetime.now(UTC):
         raise HTTPException(422, "start_time must be in the future")
     try:
         return store.create_appointment(body)
     except SlotConflictError:
         # Don't echo the conflicting appointment's ID: it belongs to another patient.
-        raise HTTPException(409, "Provider already booked for an overlapping time slot")
+        raise HTTPException(409, "Provider already booked for an overlapping time slot") from None
 
 
 @app.delete("/appointments/{appt_id}", response_model=Appointment)

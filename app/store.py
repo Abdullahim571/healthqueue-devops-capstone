@@ -3,6 +3,7 @@
 No real PHI is ever stored. A production system would use a managed database
 (provisioned later with OpenTofu); the in-memory store keeps the capstone simple.
 """
+
 import threading
 import uuid
 from datetime import timedelta

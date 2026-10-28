@@ -1,0 +1,23 @@
+# Ruff: Python linter + formatter, run in CI (test job) and by pre-commit.
+target-version = "py313" # matches the Dockerfile base image and CI
+line-length = 100
+
+[lint]
+select = [
+  "E", "W", # pycodestyle errors and warnings
+  "F",      # pyflakes: unused imports/variables, undefined names
+  "I",      # import sorting
+  "B",      # flake8-bugbear: likely bugs (mutable defaults, exception chaining, ...)
+  "UP",     # pyupgrade: modern syntax for the target Python version
+  "S",      # flake8-bandit: security smells (hardcoded secrets, unsafe calls, ...)
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["S101"] # assert is how pytest tests are written
+# Offline analysis scripts: seeded random is intentional (reproducible SYNTHETIC data, not crypto),
+# and the long lines are explanatory comments/strings.
+"docs/dora/**" = ["S311", "E501"]
+
+[format]
+# The DORA scripts keep their compact hand-aligned tables; they are still linted.
+exclude = ["docs/dora/**"]

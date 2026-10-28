@@ -13,10 +13,10 @@ Standard library only; the fixed seed makes the output reproducible.
 import csv
 import math
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 SEED = 571
-START = datetime(2026, 7, 26, tzinfo=timezone.utc)  # 90 days ending 2026-10-23
+START = datetime(2026, 7, 26, tzinfo=UTC)  # 90 days ending 2026-10-23
 DAYS = 90
 
 # Measured in this project (minutes).

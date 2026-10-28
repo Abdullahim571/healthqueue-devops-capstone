@@ -1,5 +1,11 @@
 # HealthQueue — Appointment Scheduling API (DevOps Capstone)
 
+[![ci](https://github.com/Abdullahim571/healthqueue-devops-capstone/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Abdullahim571/healthqueue-devops-capstone/actions/workflows/ci.yml)
+[![validate](https://github.com/Abdullahim571/healthqueue-devops-capstone/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Abdullahim571/healthqueue-devops-capstone/actions/workflows/validate.yml)
+![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
+![SLSA](https://img.shields.io/badge/SLSA-Build%20L3%20(self--assessed)-blue)
+[![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
+
 Patient-facing appointment scheduling API for HealthQueue, a health-tech startup, with a
 production-grade DevOps pipeline: CI/CD with supply-chain security, OpenTofu infrastructure,
 GitOps delivery to Kubernetes with Argo CD, and an observability plan with SLOs.
@@ -22,8 +28,8 @@ GitOps delivery to Kubernetes with Argo CD, and an observability plan with SLOs.
 flowchart LR
   DEV["Developer<br/>git push main"] --> GHA
   subgraph GHA["GitHub Actions (ci.yml)"]
-    T["pytest"] & S["Trivy fs<br/>deps · secrets · IaC"] --> B["Build → Trivy image gate<br/>→ Syft SBOM"]
-    B --> P["Push to GHCR by digest<br/>cosign sign + SBOM attest + verify"]
+    T["ruff + pytest<br/>(coverage ≥ 95 %)"] & S["Trivy fs<br/>deps · secrets · IaC"] --> B["Build once → Trivy image gate<br/>→ Syft SBOM"]
+    B --> P["Push the scanned image<br/>digest check · cosign sign<br/>SBOM attest · verify"]
     P --> L["SLSA L3 provenance<br/>(isolated generator)"]
     L --> G["gitops-bump:<br/>commit new digest to k8s/"]
   end
@@ -43,7 +49,9 @@ flowchart LR
 |---|---|
 | `app/`, `tests/` | FastAPI service (in-memory store, fictional patients) and pytest suite |
 | `Dockerfile` | Multi-stage, non-root (UID 10001), pip removed from the runtime image |
-| `.github/` | CI/CD workflow and Dependabot config |
+| `.github/` | Workflows (`ci.yml` build/deliver, `validate.yml` config checks), Dependabot, CODEOWNERS, PR template |
+| `ruff.toml`, `.pre-commit-config.yaml` | Python lint/format rules; local pre-commit hooks (ruff, YAML, `tofu fmt`) |
+| `LICENSE`, `SECURITY.md` | MIT license; how to report a vulnerability privately |
 | `infra/` | OpenTofu: local Docker deployment with encrypted state ([infra/README.md](infra/README.md)) |
 | `cluster/` | kind cluster definition |
 | `argocd/` | Lean Argo CD install and the `healthqueue-api` Application |
@@ -71,6 +79,14 @@ pytest -v
 uvicorn app.main:app --reload
 ```
 
+Quality checks (the same ones CI runs):
+
+```bash
+ruff check . && ruff format --check .            # lint + formatting (rules in ruff.toml)
+pytest -W error --cov=app --cov-fail-under=95    # tests, coverage floor
+pip install pre-commit==4.7.0 && pre-commit install   # optional: run the checks on every commit
+```
+
 With Docker:
 
 ```bash
@@ -94,7 +110,7 @@ docker run -p 8000:8000 healthqueue-api:dev
 
 | Stage | Tool | Gate |
 |---|---|---|
-| Unit tests | pytest | any failure |
+| Lint + unit tests | ruff (lint + format), pytest with `-W error` | any finding, failure or warning; coverage < 95 % |
 | Source scan | Trivy fs (deps, secrets, IaC misconfig) | HIGH/CRITICAL |
 | Build | Docker Buildx, **once** (multi-stage, non-root, no pip at runtime) | — |
 | Image scan | Trivy image (+ SARIF to Security tab) | HIGH/CRITICAL with a fix |
@@ -209,8 +225,33 @@ docker run --rm ghcr.io/sigstore/cosign/cosign:v3.1.4 verify \
 ## Week 8 refinements (Option A: refine existing work)
 
 The Week 7 capstone was reviewed end to end (CI/CD, Dockerfile, OpenTofu, Kubernetes, Argo CD,
-docs). The fixes below were applied in priority order, one commit per group, and each was
-validated before committing.
+docs). The review produced 20 findings. They were fixed in priority order (reliability bugs first,
+polish last) in six groups, one commit each, and every group was validated before committing.
+
+| Group | Focus | Highlights | Commit |
+|---|---|---|---|
+| 1 | Release reliability | Main runs can't be cancelled mid-release; `gitops-bump` survives `main` moving; fixed a bug where a failed digest update **passed silently** | `3a9efad` |
+| 2 | Enforced validation | New `validate.yml`: `promtool` rule tests, `tofu fmt/validate`, `kustomize` + `kubeconform` on every push and PR | `4f78628` |
+| 3 | Least privilege in the cluster | Dedicated Argo CD **AppProject**; default-deny **NetworkPolicy** (no egress) | `a74bf7a` |
+| 4 | Artifact integrity | Image **built once**; the registry digest is checked against the scanned image before signing and deploying | `c237650` |
+| 5 | Pinning and cleanup | Argo CD install and base image pinned; OpenTofu CPU/memory limits; unused config removed; privacy fix in the 409 error; docs corrected | `4a745ba` |
+| 6 | Professional polish | ruff lint/format and coverage in CI; pre-commit; LICENSE, SECURITY.md, CODEOWNERS, PR template; badges; edge-case tests | *(final Week 8 commit)* |
+
+**Before → after at a glance**
+
+| | Week 7 | Week 8 |
+|---|---|---|
+| Unit tests | 13, one deprecation warning | **19**, 0 warnings (`-W error`), **100 %** line coverage (CI floor 95 %) |
+| Static checks in CI | Trivy only | + ruff, promtool, `tofu fmt/validate`, kubeconform, AppProject whitelist check |
+| Image published | Rebuilt after scanning (digest ≠ scanned image) | Scanned image pushed as-is; digest match verified |
+| Unpinned upstream inputs | Base image tag, Argo CD install tag, `cosign:latest`, PSS `latest` | All pinned (digest / commit / version) |
+| Cluster blast radius | `default` AppProject, open pod networking | Scoped AppProject, default-deny NetworkPolicy |
+| Repo hygiene | No license, security policy, code owners or PR template | All four, plus pre-commit hooks |
+
+**Reviewing and rolling out.** All six commits are local; nothing has been pushed or deployed.
+After pushing, check that both workflows go green. The first real runs of the new promtool,
+kubeconform and single-build push steps happen there. Then apply the AppProject (Group 3, rollout
+order below) and run `tofu apply` to pick up the container limits (Group 5).
 
 ### Group 1: CI/CD release reliability
 
@@ -322,6 +363,25 @@ first real end-to-end run happens on GitHub after push.
 - **OpenTofu:** the next `tofu apply` **replaces** `docker_container.api` (limits, env and mount changes) and rebuilds the image (Dockerfile changed). Expect a few seconds of downtime on `127.0.0.1:8000`, and in-memory appointments are lost, as with any restart.
 - **Kubernetes:** pushing changes the namespace labels (applied in place, no pod restart). The Dockerfile change produces a new image digest, which `gitops-bump` rolls out through Argo CD as a normal deploy.
 - The Argo CD install itself is unchanged (identical render).
+
+### Group 6: Professional polish
+
+| Area | Change | How it was validated |
+|---|---|---|
+| **Code quality in CI** | New `ruff.toml` (pycodestyle, pyflakes, import order, bugbear, pyupgrade, **bandit security rules**). The `test` job now runs `ruff check` + `ruff format --check`, then pytest with `-W error` and coverage (`--cov-fail-under=95`, XML report uploaded with the JUnit results) | `ruff check`: all passed; `ruff format --check`: 10 files formatted; pytest: 19 passed, 0 warnings, 100 % coverage |
+| **Lint findings fixed** | `timezone.utc` → `UTC`; exception chaining (`raise … from None`) in the 409 handler; `str, Enum` → `StrEnum`. DORA scripts are linted but not reformatted (their compact tables stay readable); `S311` (seeded `random`) is ignored there because it's intentional | New test confirms statuses still serialise as plain `"scheduled"` / `"cancelled"`; the DORA CSV regenerates **byte-identical** (MD5 `5a2cd16d…`, as recorded in the baseline) |
+| **Pre-commit** | `.pre-commit-config.yaml`: whitespace/EOF/LF fixes, YAML syntax, merge markers, large files, private keys, ruff (same version as CI), `tofu fmt`. Hook repos pinned to commit SHAs | `pre-commit validate-config` OK; `pre-commit run --all-files`: 10/10 hooks passed |
+| **Missing tests** | Back-to-back bookings (end = next start) allowed; a 1-minute overlap rejected; unknown paths share the single `route="unmatched"` label and never leak into metrics; `/metrics` isn't counted in the SLI | 19/19 pass |
+| **Repo files** | `LICENSE` (MIT); `SECURITY.md` (private reporting via GitHub, scope, response time); `.github/CODEOWNERS`; `.github/pull_request_template.md` (checklist mirrors this repo's rules: SHA-pinned actions, AppProject whitelist, fictional data only) | Reviewed |
+| **README and CI header** | Status badges (ci, validate, coverage, SLSA, license); architecture diagram updated for Groups 2 and 4; quality-check commands under *Run locally*; the ambiguous ASCII diagram in `ci.yml` replaced with a job/trigger/steps table | Workflow re-parsed after the header change |
+
+The coverage and SLSA badges are static (they record the last measured value and the
+self-assessment); the `ci` and `validate` badges are live from GitHub Actions.
+
+**Settings to enable on GitHub** (repository settings, not code, so not changed here): *private
+vulnerability reporting* (used by `SECURITY.md`), and branch protection on `main` with required
+status checks and code-owner review (roadmap item 1). The `gitops-bump` bot needs a bypass rule for
+the latter.
 
 ## Known limitations
 

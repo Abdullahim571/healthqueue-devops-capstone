@@ -1,0 +1,35 @@
+# Local checks that run on `git commit`, catching in seconds what CI would reject minutes later.
+#   pip install pre-commit==4.7.0
+#   pre-commit install            # once per clone
+#   pre-commit run --all-files    # check everything now
+# Hook repos are pinned to commit SHAs (tag in the "frozen" comment), matching the SHA pinning used
+# for GitHub Actions. ruff's version matches requirements-dev.txt so local and CI results agree.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf] # same rule as .gitattributes
+      - id: check-yaml
+        args: [--allow-multiple-documents] # k8s/networkpolicy.yaml holds two documents
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 25bcf95026b96e2dd3c0aec3090c3d6ef6ca2e6c # frozen: v0.17.3
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+
+  # Uses the tofu binary already on your PATH (see infra/README.md); no download.
+  - repo: local
+    hooks:
+      - id: tofu-fmt
+        name: tofu fmt -check
+        entry: tofu -chdir=infra fmt -check -recursive -diff
+        language: system
+        files: ^infra/.*\.tf$
+        pass_filenames: false
