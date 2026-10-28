@@ -16,6 +16,6 @@ resources:
 - networkpolicy.yaml
 
 images:
-- digest: sha256:e86c8d49fa81008619797ba4e91c38a20a0d3911e39f8b8ebdb8c0e0903d236b
+- digest: sha256:af2cf991bb3bc0b570657b79423cd4249f2d3b8be9773de6293dc3abccbc1f4b
   name: healthqueue-api
   newName: ghcr.io/abdullahim571/healthqueue-devops-capstone
